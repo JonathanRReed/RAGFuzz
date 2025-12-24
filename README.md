@@ -627,28 +627,10 @@ mypy ragfuzz
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License
 
 ## Acknowledgments
 
 - Inspired by GPTFuzz-style fuzzing approaches
 - Uses AFL-style feedback-driven corpus management
 - Compatible with OpenAI, LM Studio, Ollama, and OpenRouter APIs
-
-## Roadmap
-
-### v0.3.0 (Planned)
-
-- [ ] Markdown report generation
-- [ ] Minimization algorithm for failure reduction
-- [ ] Tool fuzzing mode
-- [ ] Real-time WebSocket streaming mode
-- [ ] WASM scorer plugins
-- [ ] Statistical significance testing for regression detection
-
-### v0.4.0 (Future)
-
-- [ ] Distributed fuzzing
-- [ ] Advanced poison strategies (gradient-based)
-- [ ] Integration with popular RAG frameworks (LangChain, LlamaIndex)
-- [ ] Web dashboard for real-time monitoring
