@@ -13,6 +13,7 @@ from ragfuzz.engine import Cache, Scheduler, SchedulerConfig
 from ragfuzz.mutators import (
     GrammarMutator,
     LLMGuidedMutator,
+    Mutator,
     PoisonMutator,
     StatefulDialogueMutator,
     TemplateMutator,
@@ -189,8 +190,8 @@ def check_api(
                 checks.append(("query", "❌", str(e)))
 
             # Test trace endpoint
-            if response := next((c[2] for c in checks if c[0] == "query" and c[1] == "✅"), None):
-                trace_id = response.split(": ")[1] if ": " in response else None
+            if trace_str := next((c[2] for c in checks if c[0] == "query" and c[1] == "✅"), None):
+                trace_id = trace_str.split(": ")[1] if ": " in trace_str else None
                 if trace_id:
                     try:
                         trace_data = await target.get_trace(trace_id)
@@ -387,7 +388,7 @@ def run(
                 console.print(f"Estimated total cost: ${estimated_cost:.4f}")
                 return
 
-            target = ChatTarget(target_id="chat", provider=provider_instance)
+            target_instance: ChatTarget | JRAutoRAGTarget = ChatTarget(target_id="chat", provider=provider_instance)
             scorer = HeuristicScorer()
 
             run_dir = RunDir()
@@ -398,7 +399,7 @@ def run(
 
             # Setup target based on poison mode
             if poison:
-                target = JRAutoRAGTarget(
+                target_instance = JRAutoRAGTarget(
                     target_id="jr_autorag",
                     base_url=suite_config.requires.get("base_url", "http://localhost:8000"),
                 )
@@ -414,10 +415,10 @@ def run(
 
                 poisoned_chunks = json.loads(poison_chunks_json)
                 if poisoned_chunks:
-                    await target.ingest_documents(poisoned_chunks, tags={"run_id": run_dir.run_id})
+                    await target_instance.ingest_documents(poisoned_chunks, tags={"run_id": run_dir.run_id})
                     console.print(f"✅ Ingested {len(poisoned_chunks)} poisoned chunks")
             else:
-                target = ChatTarget(target_id="chat", provider=provider_instance)
+                target_instance = ChatTarget(target_id="chat", provider=provider_instance)
 
             scorer = HeuristicScorer()
 
@@ -454,7 +455,7 @@ def run(
                 cases = await scheduler.run_suite(
                     seeds=seeds,
                     mutators=mutators,
-                    target=target,
+                    target=target_instance,
                     scorer=scorer,
                     suite_id=suite_config.name,
                     target_id="chat",
@@ -496,9 +497,9 @@ def run(
             console.print(f"\n📊 Report: [bold]{report_path}[/bold]")
 
             # Cleanup poisoned chunks if poison mode was used
-            if poison and isinstance(target, JRAutoRAGTarget):
+            if poison and isinstance(target_instance, JRAutoRAGTarget):
                 try:
-                    await target.delete_by_tag("run_id", run_dir.run_id)
+                    await target_instance.delete_by_tag("run_id", run_dir.run_id)
                     console.print(
                         f"✅ Cleaned up poisoned chunks tagged with run_id: {run_dir.run_id}"
                     )
@@ -743,7 +744,7 @@ def _setup_mutators(
     provider: OpenAICompatProvider,
     poison_mode: str | None = None,
     run_id: str = "",
-) -> list:
+) -> list[Mutator]:
     """Setup mutators from suite configuration.
 
     Args:
@@ -755,7 +756,7 @@ def _setup_mutators(
     Returns:
         List of configured mutators.
     """
-    mutators = []
+    mutators: list[Mutator] = []
 
     # Add poison mutator if mode specified
     if poison_mode:

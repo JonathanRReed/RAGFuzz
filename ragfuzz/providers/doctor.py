@@ -38,7 +38,7 @@ class ProviderDoctor:
         provider_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for provider_id, result in zip(self.config.providers, provider_results, strict=False):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 results[provider_id] = {
                     "status": "error",
                     "error": str(result),

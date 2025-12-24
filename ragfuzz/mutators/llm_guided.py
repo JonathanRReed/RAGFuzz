@@ -148,4 +148,4 @@ Return only the mutated prompt, without any explanations or metadata."""
         Returns:
             True if exhausted.
         """
-        return self._attempt_count >= self.max_attempts
+        return bool(self._attempt_count >= self.max_attempts)

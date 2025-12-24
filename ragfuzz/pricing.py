@@ -63,7 +63,10 @@ def get_pricing(provider_id: str, model_id: str | None = None) -> dict[str, floa
 
     # If provider has model-specific pricing and model_id is provided
     if model_id and isinstance(provider_data, dict) and model_id in provider_data:
-        return provider_data[model_id]
+        result = provider_data[model_id]
+        if isinstance(result, dict):
+            return dict(result)  # type: ignore[return-value]
+        return DEFAULT_PRICING
 
     # If provider has default pricing
     if isinstance(provider_data, dict) and "prompt_per_1k" in provider_data:

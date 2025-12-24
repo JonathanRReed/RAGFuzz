@@ -26,14 +26,15 @@ def compare_runs(run1_path: str, run2_path: str) -> dict[str, Any]:
     run1_cases = _load_cases(run1_dir)
     run2_cases = _load_cases(run2_dir)
 
-    comparison = {
+    differences: list[dict[str, Any]] = []
+    comparison: dict[str, Any] = {
         "run1": {"path": run1_path, "summary": _calculate_run_summary(run1_cases)},
         "run2": {"path": run2_path, "summary": _calculate_run_summary(run2_cases)},
-        "differences": [],
+        "differences": differences,
     }
 
     if run1_data and run2_data and run1_data.get("run_id") != run2_data.get("run_id"):
-        comparison["differences"].append(
+        differences.append(
             {
                 "type": "run_id",
                 "run1": run1_data.get("run_id"),
@@ -46,7 +47,7 @@ def compare_runs(run1_path: str, run2_path: str) -> dict[str, Any]:
             comparison["run1"]["summary"]["leak_rate"] - comparison["run2"]["summary"]["leak_rate"]
         )
         if abs(leak_rate_diff) > 0.01:
-            comparison["differences"].append(
+            differences.append(
                 {
                     "type": "leak_rate",
                     "run1": comparison["run1"]["summary"]["leak_rate"],
@@ -60,7 +61,7 @@ def compare_runs(run1_path: str, run2_path: str) -> dict[str, Any]:
             - comparison["run2"]["summary"]["failure_count"]
         )
         if failure_count_diff != 0:
-            comparison["differences"].append(
+            differences.append(
                 {
                     "type": "failure_count",
                     "run1": comparison["run1"]["summary"]["failure_count"],
@@ -71,7 +72,7 @@ def compare_runs(run1_path: str, run2_path: str) -> dict[str, Any]:
 
         new_failures_run2 = _find_new_failures(run1_cases, run2_cases)
         if new_failures_run2:
-            comparison["differences"].append(
+            differences.append(
                 {
                     "type": "new_failures_in_run2",
                     "count": len(new_failures_run2),
@@ -94,7 +95,8 @@ def _load_run_data(run_dir: Path) -> dict[str, Any] | None:
     run_json_path = run_dir / "run.json"
     if not run_json_path.exists():
         return None
-    return json.loads(run_json_path.read_text())
+    data: dict[str, Any] = json.loads(run_json_path.read_text())
+    return data
 
 
 def _load_cases(run_dir: Path) -> list[dict[str, Any]]:
@@ -195,7 +197,8 @@ def _get_input_text(case: dict[str, Any]) -> str:
     """
     messages = case.get("inputs", {}).get("messages", [])
     if messages:
-        return messages[-1].get("content", "")
+        content: str = messages[-1].get("content", "")
+        return content
     return ""
 
 

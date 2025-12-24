@@ -97,7 +97,7 @@ class JRAutoRAGTarget(Target):
         client = get_async_client()
         url = f"{self.base_url}/rag/audit/ingest"
 
-        payload = {"documents": documents}
+        payload: dict[str, Any] = {"documents": documents}
         if tags:
             payload["tags"] = tags
 
@@ -114,7 +114,8 @@ class JRAutoRAGTarget(Target):
             return response
 
         response = await _make_request()
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
 
     async def upsert_chunks(self, chunks: list[dict[str, Any]], run_id: str) -> dict[str, Any]:
         """Upsert chunks directly into. vector store.
@@ -144,7 +145,8 @@ class JRAutoRAGTarget(Target):
             return response
 
         response = await _make_request()
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
 
     async def delete_by_tag(self, tag_key: str, tag_value: str) -> dict[str, Any]:
         """Delete documents by tag.
@@ -174,7 +176,8 @@ class JRAutoRAGTarget(Target):
             return response
 
         response = await _make_request()
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
 
     async def get_trace(self, trace_id: str) -> dict[str, Any]:
         """Get full trace for. a query.
@@ -201,4 +204,5 @@ class JRAutoRAGTarget(Target):
             return response
 
         response = await _make_request()
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
