@@ -64,6 +64,7 @@ class BaselineManager:
         Returns:
             Baseline data or None if not found.
         """
+        baseline_path: Path | None
         if baseline_hash:
             baseline_path = self.baseline_dir / f"{suite_id}_{baseline_hash}.json"
         else:
@@ -72,7 +73,8 @@ class BaselineManager:
         if not baseline_path or not baseline_path.exists():
             return None
 
-        return json.loads(baseline_path.read_text())
+        data: dict[str, Any] = json.loads(baseline_path.read_text())
+        return data
 
     def _find_latest_baseline(self, suite_id: str) -> Path | None:
         """Find the latest baseline for a suite.
@@ -245,13 +247,14 @@ class BaselineManager:
         Returns:
             True if deleted.
         """
+        delete_path: Path | None
         if baseline_hash:
-            baseline_path = self.baseline_dir / f"{suite_id}_{baseline_hash}.json"
+            delete_path = self.baseline_dir / f"{suite_id}_{baseline_hash}.json"
         else:
-            baseline_path = self._find_latest_baseline(suite_id)
+            delete_path = self._find_latest_baseline(suite_id)
 
-        if not baseline_path or not baseline_path.exists():
+        if not delete_path or not delete_path.exists():
             return False
 
-        baseline_path.unlink()
+        delete_path.unlink()
         return True

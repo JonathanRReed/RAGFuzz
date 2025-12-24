@@ -96,7 +96,7 @@ class MutationGraph:
             List of nodes from root to the target.
         """
         path = []
-        current_id = node_id
+        current_id: str | None = node_id
 
         while current_id is not None:
             node = self.get_node(current_id)

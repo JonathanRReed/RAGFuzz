@@ -10,7 +10,7 @@ from jinja2 import Template
 try:
     from markupsafe import escape
 except ImportError:
-    from html import escape
+    from html import escape  # type: ignore[assignment]
 
 
 class HTMLReporter:

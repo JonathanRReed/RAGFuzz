@@ -112,7 +112,7 @@ class RunDir:
             case: The case data to write.
         """
         try:
-            import portalocker
+            import portalocker  # type: ignore[import-not-found]
 
             cases_file = self.path / "cases.jsonl"
             with cases_file.open("a") as f:
