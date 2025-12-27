@@ -1,12 +1,8 @@
-"""Tests for scheduler module."""
-
 import pytest
 
-from ragfuzz.engine import Scheduler, SchedulerConfig, Corpus
-from ragfuzz.mutators import TemplateMutator, MutationGraph
-from ragfuzz.models import ScoreVector, Case, Response, Message
-from ragfuzz.scoring import HeuristicScorer
-from ragfuzz.targets import ChatTarget
+from ragfuzz.engine import Corpus, Scheduler, SchedulerConfig
+from ragfuzz.models import ScoreVector
+from ragfuzz.mutators import MutationGraph
 
 
 class TestSchedulerConfig:
@@ -114,8 +110,6 @@ class TestScheduler:
 
     def test_corpus_energy_calculation(self) -> None:
         """Test corpus energy calculation."""
-        from ragfuzz.engine import CorpusEntry
-
         corpus = Corpus()
 
         # Test that calculate_failure_probability returns a valid probability
