@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +39,7 @@ class RunDir:
         Returns:
             A run ID string.
         """
-        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         import random
 
         suffix = "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=6))
@@ -65,7 +65,7 @@ class RunDir:
 
         run_config = {
             "run_id": self.run_id,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "config": {
                 "default_provider": config.default_provider,
                 "default_target": config.default_target,

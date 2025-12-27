@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -57,7 +57,7 @@ class Case(BaseModel):
     trace_id: str | None = None
     rag_lens_url: str | None = None
     retrieval_snapshot: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     failure_signature: str | None = None
     mutation_graph_node_id: str | None = None
     mutation_path: list[dict[str, Any]] = Field(default_factory=list)

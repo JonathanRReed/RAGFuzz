@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import os
-import tomllib
+import sys
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -78,10 +83,6 @@ class Config:
         if not path.exists():
             raise FileNotFoundError(f"Configuration file not found: {path}")
 
-        if tomllib is None:
-            raise ImportError(
-                "tomli is required for Python < 3.11. Install with: pip install tomli"
-            )
 
         try:
             data = tomllib.loads(path.read_text())
