@@ -1,7 +1,7 @@
 # ragfuzz
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: FSL-1.1-MIT](https://img.shields.io/badge/license-FSL--1.1--MIT-orange.svg)](./LICENSE)
 
 Grey-box RAG Auditor and Prompt Fuzzer (local-first)
 
@@ -627,7 +627,9 @@ mypy ragfuzz
 
 ## License
 
-MIT License
+Licensed under the Functional Source License, Version 1.1, MIT Future License.
+This repository is source-available today and converts to MIT two years after
+each version is made available. See [`LICENSE`](./LICENSE).
 
 ## Acknowledgments
 
