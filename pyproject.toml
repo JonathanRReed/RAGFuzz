@@ -4,18 +4,17 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ragfuzz"
-version = "0.2.0"
+version = "0.3.0"
 description = "Grey-box RAG Auditor and Prompt Fuzzer (local-first)"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { text = "FSL-1.1-MIT" }
 authors = [
     { name = "ragfuzz contributors" }
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
@@ -30,6 +29,8 @@ dependencies = [
     "tomli>=1.2.0; python_version < '3.11'",
     "tenacity>=8.2.0",
     "portalocker>=2.7.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
 ]
 
 [project.optional-dependencies]

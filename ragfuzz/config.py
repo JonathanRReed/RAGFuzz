@@ -15,6 +15,16 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+RUN_TYPES = {
+    "retrieval",
+    "faithfulness",
+    "poisoning",
+    "prompt-injection",
+    "jailbreak",
+    "leakage",
+    "multi-turn",
+}
+
 
 @dataclass
 class ProviderConfig:
@@ -150,26 +160,26 @@ class Config:
 type = "openai_compat"
 base_url = "http://localhost:1234/v1"
 api_key_env = "LM_STUDIO_API_KEY"  # Optional for LM Studio
-default_model = "model"
+default_model = "local-model"
 
 [providers.ollama]
 type = "openai_compat"
 base_url = "http://localhost:11434/v1"
 api_key_env = "OLLAMA_API_KEY"  # Optional for Ollama
-default_model = "llama2"
+default_model = "auto"
 
-[providers.openrouter]
+[providers.vllm]
 type = "openai_compat"
-base_url = "https://openrouter.ai/api/v1"
-api_key_env = "OPENROUTER_API_KEY"
-default_model = "anthropic/claude-sonnet-4"
+base_url = "http://localhost:8000/v1"
+api_key_env = "VLLM_API_KEY"  # Optional for local vLLM
+default_model = "local-model"
 
 [budget]
 max_runs = 1000
 max_cost_usd = 10.0
 max_duration_seconds = 3600
 
-default_provider = "lmstudio"
+default_provider = "ollama"
 default_target = "chat"
 
 [run]
@@ -212,6 +222,7 @@ class SuiteConfig(BaseModel):
     """Configuration for a test suite."""
 
     name: str
+    run_type: str = "prompt-injection"
     requires: dict[str, Any] = Field(default_factory=dict)
     inputs: list[dict[str, Any]] = Field(default_factory=list, min_length=1)
     canary: dict[str, Any] = Field(default_factory=dict)
@@ -219,6 +230,15 @@ class SuiteConfig(BaseModel):
     scoring: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
     cleanup: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("run_type")
+    @classmethod
+    def validate_run_type(cls, v: str) -> str:
+        """Validate the research-backed run type."""
+        if v not in RUN_TYPES:
+            allowed = ", ".join(sorted(RUN_TYPES))
+            raise ValueError(f"run_type must be one of: {allowed}")
+        return v
 
     @field_validator("inputs")
     @classmethod

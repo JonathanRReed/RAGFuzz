@@ -71,6 +71,8 @@ class Scheduler:
         provider_id: str,
         model_id: str,
         run_id: str = "",
+        run_type: str = "prompt-injection",
+        suite_context: dict[str, Any] | None = None,
     ) -> list[Case]:
         """Run a complete fuzzing suite with feedback-driven corpus.
 
@@ -84,6 +86,8 @@ class Scheduler:
             provider_id: Provider identifier.
             model_id: Model identifier.
             run_id: Run identifier.
+            run_type: Research-backed run type for the suite.
+            suite_context: Context passed to scorers.
 
         Returns:
             List of all executed cases.
@@ -124,6 +128,9 @@ class Scheduler:
                     model_id,
                     semaphore,
                     run_id=run_id,
+                    run_type=run_type,
+                    target_id=target_id,
+                    suite_context=suite_context,
                 )
                 tasks.append(task)
 
@@ -152,6 +159,9 @@ class Scheduler:
         model_id: str,
         semaphore: asyncio.Semaphore,
         run_id: str = "",
+        run_type: str = "prompt-injection",
+        target_id: str = "chat",
+        suite_context: dict[str, Any] | None = None,
     ) -> Case | None:
         """Schedule and execute a single corpus entry.
 
@@ -165,6 +175,9 @@ class Scheduler:
             model_id: Model identifier.
             semaphore: Semaphore for concurrency control.
             run_id: Run identifier.
+            run_type: Research-backed run type for the suite.
+            target_id: Target identifier.
+            suite_context: Context passed to scorers.
 
         Returns:
             Executed case or None if cache hit.
@@ -237,19 +250,15 @@ class Scheduler:
                     return None
 
             try:
-                from ragfuzz.config import Config
-
-                suite_canary = (
-                    getattr(Config, "_loaded_suite", {}).get("canary", {}).get("value")
-                    if hasattr(Config, "_loaded_suite")
-                    else None
-                )
+                suite_context = suite_context or {}
+                scoring_context = dict(suite_context)
+                scoring_context["prompt"] = mutated_input
 
                 target_response = await target.execute(
                     {"messages": [{"role": "user", "content": mutated_input}]}
                 )
 
-                scores = await scorer.score(target_response, context={"canary": suite_canary})
+                scores = await scorer.score(target_response, context=scoring_context)
 
                 if self.config.use_cache:
                     self.cache.set(
@@ -279,6 +288,10 @@ class Scheduler:
                     case_id=f"case_{self._run_count:06d}",
                     run_id=run_id,
                     suite_id=suite_id,
+                    run_type=run_type,
+                    target_id=target_id,
+                    provider_id=provider_id,
+                    model_id=model_id,
                     inputs={"messages": [{"role": "user", "content": mutated_input}]},
                     target_response=target_response,
                     scores=scores,
@@ -287,10 +300,26 @@ class Scheduler:
                     mutation_path=mutation_path,
                 )
 
-            except Exception:
+            except Exception as exc:
                 async with self._lock:
                     self._run_count += 1
-                return None
+                    case_number = self._run_count
+                return Case(
+                    case_id=f"case_{case_number:06d}",
+                    run_id=run_id,
+                    suite_id=suite_id,
+                    run_type=run_type,
+                    target_id=target_id,
+                    provider_id=provider_id,
+                    model_id=model_id,
+                    inputs={"messages": [{"role": "user", "content": mutated_input}]},
+                    target_response=None,
+                    scores=ScoreVector(tool_error_rate=1.0),
+                    trace_id=None,
+                    mutation_graph_node_id=parent_node_id,
+                    mutation_path=mutation_path,
+                    retrieval_snapshot={"error": str(exc)},
+                )
 
     def _update_corpus(self, case: Case, suite_id: str, target_id: str) -> None:
         """Update the corpus with a new case.

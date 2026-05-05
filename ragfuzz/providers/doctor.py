@@ -101,11 +101,15 @@ class ProviderDoctor:
             report["error"] = str(e)
             return report
 
+        models: list[str] = []
+
         # Probe capabilities
         try:
             models = await provider.list_models()
             report["models_available"] = len(models)
             report["models_sample"] = models[:5] if models else []
+            selected_model = self._select_chat_model(provider_id, provider_config.default_model, models)
+            report["selected_model"] = selected_model
 
             report["supports_streaming"] = provider.supports_streaming()
             report["supports_tools"] = provider.supports_tools()
@@ -114,9 +118,8 @@ class ProviderDoctor:
             report["capabilities_error"] = str(e)
 
         # Validate default model
-        if provider_config.default_model:
+        if provider_config.default_model and provider_config.default_model != "auto":
             try:
-                models = await provider.list_models()
                 if provider_config.default_model not in models:
                     report["default_model_warning"] = (
                         f"Default model '{provider_config.default_model}' not found in available models"
@@ -127,22 +130,40 @@ class ProviderDoctor:
         # Run benchmarks if requested
         if benchmark:
             try:
-                benchmark_results = await provider.benchmark(num_requests=3)
+                benchmark_model = str(report.get("selected_model") or provider_config.default_model)
+                benchmark_results = await provider.benchmark(
+                    num_requests=3,
+                    model=benchmark_model,
+                )
                 report["benchmark"] = benchmark_results
             except Exception as e:
                 report["benchmark_error"] = str(e)
-
-        # Check for OpenRouter-specific requirements
-        if "openrouter" in provider_id.lower():
-            # Note: This is a simplified check. OpenRouter recommends HTTP-Referer and X-Title headers
-            report["warning"] = (
-                "OpenRouter recommends HTTP-Referer and X-Title headers for attribution"
-            )
 
         if report.get("status") != "healthy":
             report["error"] = report.get("error", "Unknown error")
 
         return report
+
+    def _select_chat_model(
+        self,
+        provider_id: str,
+        configured_model: str,
+        models: list[str],
+    ) -> str | None:
+        if not models:
+            return None
+        if configured_model != "auto" and configured_model in models:
+            return configured_model
+
+        lowered_provider = provider_id.lower()
+        chat_models = [
+            model
+            for model in models
+            if "embed" not in model.lower() and "rerank" not in model.lower()
+        ]
+        if lowered_provider == "ollama" and chat_models:
+            return chat_models[0]
+        return chat_models[0] if chat_models else models[0]
 
     def format_report(self, results: dict[str, dict[str, Any]]) -> str:
         """Format provider health check results as a human-readable string.
@@ -156,19 +177,22 @@ class ProviderDoctor:
         lines = ["Provider Health Report", "=" * 50, ""]
 
         for provider_id, report in results.items():
-            status_emoji = {
-                "healthy": "✅",
-                "unhealthy": "❌",
-                "error": "⚠️",
-                "not_found": "❓",
-                "missing_api_key": "🔑",
-            }.get(report.get("status", "unknown"), "❓")
+            status_label = {
+                "healthy": "OK",
+                "unhealthy": "FAIL",
+                "error": "WARN",
+                "not_found": "MISSING",
+                "missing_api_key": "KEY",
+            }.get(report.get("status", "unknown"), "UNKNOWN")
 
-            lines.append(f"{status_emoji} {provider_id}")
+            lines.append(f"{status_label} {provider_id}")
             lines.append(f"   Status: {report.get('status', 'unknown')}")
             lines.append(f"   Type: {report.get('type', 'N/A')}")
             lines.append(f"   Base URL: {report.get('base_url', 'N/A')}")
-            lines.append(f"   API Key: {'Set' if report.get('api_key_set') else 'Not set'}")
+            api_key_status = "Set" if report.get("api_key_set") else "Not required locally"
+            lines.append(f"   API Key: {api_key_status}")
+            if report.get("selected_model"):
+                lines.append(f"   Selected Model: {report['selected_model']}")
 
             if "models_available" in report:
                 lines.append(f"   Models: {report['models_available']} available")
@@ -188,7 +212,11 @@ class ProviderDoctor:
             if "error" in report:
                 lines.append(f"   Error: {report['error']}")
             if "warning" in report:
-                lines.append(f"   ⚠️  Warning: {report['warning']}")
+                lines.append(f"   Warning: {report['warning']}")
+            if "default_model_warning" in report:
+                lines.append(f"   Warning: {report['default_model_warning']}")
+            if "benchmark_error" in report:
+                lines.append(f"   Benchmark Error: {report['benchmark_error']}")
 
             lines.append("")
 

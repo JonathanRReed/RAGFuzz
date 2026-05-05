@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import webbrowser
 from pathlib import Path
+from urllib.parse import urlparse
 
 import typer
 from rich.console import Console
@@ -22,6 +25,8 @@ from ragfuzz.providers import OpenAICompatProvider, ProviderDoctor
 from ragfuzz.reports import HTMLReporter
 from ragfuzz.reports.viz import MutationGraphViz
 from ragfuzz.scoring import HeuristicScorer
+from ragfuzz.scoring.base import Scorer
+from ragfuzz.scoring.judge import JudgeScorer
 from ragfuzz.storage import RunDir
 from ragfuzz.storage.baseline import BaselineManager
 from ragfuzz.targets import ChatTarget
@@ -42,14 +47,43 @@ def init(config_path: str = "ragfuzz.toml") -> None:
     """
     try:
         Config.create_default(config_path)
-        console.print(f"✅ Configuration created at [bold]{config_path}[/bold]")
+        console.print(f"OK Configuration created at [bold]{config_path}[/bold]")
         console.print("\nNext steps:")
         console.print("1. Edit configuration to set up your providers")
-        console.print("2. Run [bold]ragfuzz providers doctor[/bold] to check connectivity")
+        console.print("2. Run [bold]ragfuzz providers-doctor[/bold] to check connectivity")
         console.print("3. Create a test suite in [bold]suites/[/bold]")
     except Exception as e:
-        console.print(f"❌ Failed to create configuration: [red]{e}[/red]")
+        console.print(f"ERROR Failed to create configuration: [red]{e}[/red]")
         raise typer.Exit(1) from None
+
+
+@app.command()
+def demo(
+    host: str = typer.Option("127.0.0.1", "--host", help="Host for the local demo app"),
+    port: int = typer.Option(8765, "--port", help="Port for the local demo app"),
+    open_browser: bool = typer.Option(
+        True,
+        "--open/--no-open",
+        help="Open the demo in the default browser",
+    ),
+) -> None:
+    """Launch the local RAGFuzz product demo."""
+    try:
+        import uvicorn
+
+        from ragfuzz.demo import create_app
+
+        url = f"http://{host}:{port}"
+        console.print(f"Starting RAGFuzz demo at [bold]{url}[/bold]")
+        console.print("Demo data is in memory. Normal CLI run artifacts remain on disk.")
+
+        if open_browser:
+            webbrowser.open(url)
+
+        uvicorn.run(create_app(), host=host, port=port, log_level="warning")
+    except Exception as e:
+        console.print(f"ERROR Failed to launch demo: [red]{e}[/red]")
+        raise typer.Exit(1) from e
 
 
 @app.command()
@@ -77,7 +111,7 @@ def providers_ls() -> None:
         console.print("Run [bold]ragfuzz init[/bold] to create a configuration.")
         raise typer.Exit(1) from None
     except Exception as e:
-        console.print(f"❌ Error loading configuration: [red]{e}[/red]")
+        console.print(f"ERROR Error loading configuration: [red]{e}[/red]")
         raise typer.Exit(1) from e
 
 
@@ -94,7 +128,7 @@ def models_ls(
             provider_config = config.get_provider(provider_id)
 
             if not provider_config:
-                console.print(f"❌ Provider '{provider_id}' not found in configuration")
+                console.print(f"ERROR Provider '{provider_id}' not found in configuration")
                 raise typer.Exit(1)
 
             api_key = config.get_api_key(provider_id)
@@ -113,8 +147,9 @@ def models_ls(
                 console.print("No models found.")
                 return
 
+            selected_model = _select_chat_model(provider_id, provider_config.default_model, models)
             for i, model in enumerate(models, 1):
-                default_marker = " (default)" if model == provider_config.default_model else ""
+                default_marker = " (selected)" if model == selected_model else ""
                 console.print(f"{i:2d}. {model}{default_marker}")
 
         except FileNotFoundError:
@@ -122,7 +157,7 @@ def models_ls(
             console.print("Run [bold]ragfuzz init[/bold] to create a configuration.")
             raise typer.Exit(1) from None
         except Exception as e:
-            console.print(f"❌ Error: [red]{e}[/red]")
+            console.print(f"ERROR [red]{e}[/red]")
             raise typer.Exit(1) from e
         finally:
             await close_client()
@@ -154,7 +189,7 @@ def providers_doctor(
             console.print("Run [bold]ragfuzz init[/bold] to create a configuration.")
             raise typer.Exit(1) from None
         except Exception as e:
-            console.print(f"❌ Error: [red]{e}[/red]")
+            console.print(f"ERROR [red]{e}[/red]")
             raise typer.Exit(1) from e
 
     asyncio.run(_doctor())
@@ -172,6 +207,10 @@ def check_api(
             import json
 
             headers_dict = json.loads(headers) if headers else None
+            if headers_dict is not None and not isinstance(headers_dict, dict):
+                raise ValueError("--headers must be a JSON object")
+            if not _is_http_url(url):
+                raise ValueError("URL must start with http:// or https://")
             target = JRAutoRAGTarget(
                 target_id="jr_autorag_check", base_url=url, headers=headers_dict
             )
@@ -185,12 +224,12 @@ def check_api(
             try:
                 test_input = {"query": "test query", "run_id": "check"}
                 response = await target.execute(test_input)
-                checks.append(("query", "✅", f"trace_id: {response.trace_id}"))
+                checks.append(("query", "OK", f"trace_id: {response.trace_id}"))
             except Exception as e:
-                checks.append(("query", "❌", str(e)))
+                checks.append(("query", "FAIL", str(e)))
 
             # Test trace endpoint
-            if trace_str := next((c[2] for c in checks if c[0] == "query" and c[1] == "✅"), None):
+            if trace_str := next((c[2] for c in checks if c[0] == "query" and c[1] == "OK"), None):
                 trace_id = trace_str.split(": ")[1] if ": " in trace_str else None
                 if trace_id:
                     try:
@@ -198,27 +237,27 @@ def check_api(
                         checks.append(
                             (
                                 "trace",
-                                "✅",
+                                "OK",
                                 f"Found trace with {len(trace_data.get('steps', []))} steps",
                             )
                         )
                     except Exception as e:
-                        checks.append(("trace", "❌", str(e)))
+                        checks.append(("trace", "FAIL", str(e)))
 
             # Test ingestion endpoint
             try:
                 await target.ingest_documents([{"text": "test doc"}], tags={"run_id": "check"})
-                checks.append(("ingestion", "✅", "Document ingested"))
+                checks.append(("ingestion", "OK", "Document ingested"))
                 await target.delete_by_tag("run_id", "check")
-                checks.append(("cleanup", "✅", "Documents cleaned up"))
+                checks.append(("cleanup", "OK", "Documents cleaned up"))
             except Exception as e:
-                checks.append(("ingestion", "❌", str(e)))
+                checks.append(("ingestion", "FAIL", str(e)))
 
             for name, status, message in checks:
                 console.print(f"{status} {name}: {message}")
 
         except Exception as e:
-            console.print(f"❌ Error: [red]{e}[/red]")
+            console.print(f"ERROR [red]{e}[/red]")
             raise typer.Exit(1) from e
         finally:
             await close_client()
@@ -248,11 +287,11 @@ def baseline_save(
             metadata={"timestamp": Path(cases_file).stat().st_mtime},
         )
 
-        console.print(f"✅ Baseline saved: [bold]{baseline_path}[/bold]")
+        console.print(f"OK Baseline saved: [bold]{baseline_path}[/bold]")
         console.print(f"   Cases: {len(cases)}")
 
     except Exception as e:
-        console.print(f"❌ Error: [red]{e}[/red]")
+        console.print(f"ERROR [red]{e}[/red]")
         raise typer.Exit(1) from e
 
 
@@ -275,7 +314,7 @@ def baseline_check(
         result = baseline_manager.compare_against_baseline(suite, cases)
 
         if result["status"] == "no_baseline":
-            console.print(f"⚠️  {result['message']}")
+            console.print(f"WARN {result['message']}")
             console.print("Run [bold]ragfuzz baseline-save[/bold] to create a baseline.")
             return
 
@@ -285,7 +324,7 @@ def baseline_check(
         current_summary = result["current_summary"]
         baseline_summary = result["baseline_summary"]
 
-        console.print("\n📊 Statistics:")
+        console.print("\nStatistics:")
         console.print(f"  Total cases: {current_summary['total_cases']}")
         console.print(
             f"  Failures: {current_summary['failure_count']} (baseline: {baseline_summary['failure_count']})"
@@ -298,17 +337,17 @@ def baseline_check(
         )
 
         if result["status"] == "regression_detected":
-            console.print("\n❌ [bold]Regressions detected:[/bold]")
+            console.print("\nERROR [bold]Regressions detected:[/bold]")
             for regression in result["regressions"]:
                 console.print(f"  • {regression['type']}:")
                 console.print(f"      Baseline: {regression['baseline']:.3f}")
                 console.print(f"      Current: {regression['current']:.3f}")
                 console.print(f"      Delta: {regression['delta']:.3f}")
         else:
-            console.print("\n✅ [bold]No regressions detected[/bold]")
+            console.print("\nOK [bold]No regressions detected[/bold]")
 
     except Exception as e:
-        console.print(f"❌ Error: [red]{e}[/red]")
+        console.print(f"ERROR [red]{e}[/red]")
         raise typer.Exit(1) from e
 
 
@@ -323,6 +362,8 @@ def run(
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Disable caching"),
     poison: str = typer.Option(None, "--poison", help="Poison mode: influence, exfil, bias"),
+    scoring: str = typer.Option(None, "--scoring", help="Scoring mode: heuristic or judge"),
+    json_summary: bool = typer.Option(False, "--json-summary", help="Print CI-friendly JSON summary"),
 ) -> None:
     """Run a test suite with AFL-style corpus scheduling."""
 
@@ -335,7 +376,10 @@ def run(
             provider_config = config.get_provider(provider_id)
 
             if not provider_config:
-                console.print(f"❌ Provider '{provider_id}' not found in configuration")
+                console.print(f"ERROR Provider '{provider_id}' not found in configuration")
+                raise typer.Exit(1)
+            if poison and poison not in {"influence", "exfil", "bias"}:
+                console.print("ERROR Poison mode must be one of: influence, exfil, bias")
                 raise typer.Exit(1)
 
             api_key = config.get_api_key(provider_id)
@@ -344,6 +388,11 @@ def run(
                 base_url=provider_config.base_url,
                 api_key=api_key,
             )
+            resolved_model = await _resolve_provider_model(
+                provider_id,
+                provider_config.default_model,
+                provider_instance,
+            )
 
             if dry_run:
                 from ragfuzz.pricing import estimate_cost, estimate_tokens
@@ -351,7 +400,7 @@ def run(
                 console.print("[yellow]Dry run mode - estimating cost...[/yellow]")
                 console.print(f"Suite: {suite_config.name}")
                 console.print(f"Provider: {provider_id}")
-                console.print(f"Model: {provider_config.default_model}")
+                console.print(f"Model: {resolved_model}")
 
                 num_runs = runs or suite_config.budget.get("runs", 100)
                 concurrency_value = concurrency or 4
@@ -378,7 +427,7 @@ def run(
                     prompt_tokens=total_prompt_tokens,
                     completion_tokens=total_completion_tokens,
                     provider_id=provider_id,
-                    model_id=provider_config.default_model,
+                    model_id=resolved_model,
                 )
 
                 console.print(f"Estimated runs: {num_runs}")
@@ -388,22 +437,33 @@ def run(
                 console.print(f"Estimated total cost: ${estimated_cost:.4f}")
                 return
 
-            target_instance: ChatTarget | JRAutoRAGTarget = ChatTarget(target_id="chat", provider=provider_instance)
-            scorer = HeuristicScorer()
+            target_instance: ChatTarget | JRAutoRAGTarget = ChatTarget(
+                target_id="chat",
+                provider=provider_instance,
+                default_model=resolved_model,
+            )
 
             run_dir = RunDir()
-            run_dir.write_run_config(config, suite_config)
+            run_dir.write_run_config(
+                config,
+                suite_config,
+                extra={"run_type": suite_config.run_type, "provider_id": provider_id},
+            )
 
             num_runs = runs or suite_config.budget.get("runs", 100)
             concurrency_value = concurrency or 4
 
             # Setup target based on poison mode
             if poison:
+                target_url = suite_config.requires.get("base_url", "http://localhost:8000")
+                if not _is_http_url(target_url):
+                    console.print("ERROR JR AutoRAG base_url must start with http:// or https://")
+                    raise typer.Exit(1)
                 target_instance = JRAutoRAGTarget(
                     target_id="jr_autorag",
-                    base_url=suite_config.requires.get("base_url", "http://localhost:8000"),
+                    base_url=target_url,
                 )
-                console.print(f"🧪 Poison mode: [bold]{poison}[/bold]")
+                console.print(f"Poison mode: [bold]{poison}[/bold]")
 
                 # Ingest poisoned chunks
                 poison_mutator = PoisonMutator(
@@ -411,16 +471,18 @@ def run(
                 )
                 poison_chunks_json = await poison_mutator.mutate("", context=None)
 
-                import json
-
                 poisoned_chunks = json.loads(poison_chunks_json)
                 if poisoned_chunks:
                     await target_instance.ingest_documents(poisoned_chunks, tags={"run_id": run_dir.run_id})
-                    console.print(f"✅ Ingested {len(poisoned_chunks)} poisoned chunks")
+                    console.print(f"OK Ingested {len(poisoned_chunks)} poisoned chunks")
             else:
-                target_instance = ChatTarget(target_id="chat", provider=provider_instance)
+                target_instance = ChatTarget(
+                    target_id="chat",
+                    provider=provider_instance,
+                    default_model=resolved_model,
+                )
 
-            scorer = HeuristicScorer()
+            scorer = _setup_scorer(scoring or suite_config.scoring.get("mode"), provider_instance)
 
             # Setup VRAM monitor if configured
             vram_monitor = None
@@ -458,10 +520,15 @@ def run(
                     target=target_instance,
                     scorer=scorer,
                     suite_id=suite_config.name,
-                    target_id="chat",
+                    target_id=target_instance.target_id,
                     provider_id=provider_id,
-                    model_id=provider_config.default_model,
+                    model_id=resolved_model,
                     run_id=run_dir.run_id,
+                    run_type=suite_config.run_type,
+                    suite_context={
+                        "canary": suite_config.canary.get("value"),
+                        "run_type": suite_config.run_type,
+                    },
                 )
 
                 # Write cases to disk
@@ -478,9 +545,9 @@ def run(
                         )
 
             stats = scheduler.get_stats()
-            console.print(f"\n✅ Run completed: [bold]{run_dir.run_id}[/bold]")
+            console.print(f"\nOK Run completed: [bold]{run_dir.run_id}[/bold]")
             console.print(f"Results: {run_dir.path}")
-            console.print("\n📊 Scheduler Stats:")
+            console.print("\nScheduler Stats:")
             console.print(f"  Runs completed: {stats['run_count']}")
             console.print(f"  Total cost: ${stats.get('total_cost_usd', 0):.2f}")
             console.print(f"  Corpus size: {stats['corpus']['total_entries']}")
@@ -488,29 +555,43 @@ def run(
 
             if cache:
                 cache_stats = cache.get_stats()
-                console.print("\n💾 Cache Stats:")
+                console.print("\nCache Stats:")
                 console.print(f"  Entries: {cache_stats['total_entries']}")
                 console.print(f"  Avg age: {cache_stats.get('avg_age_seconds', 0):.0f}s")
 
             reporter = HTMLReporter()
             report_path = reporter.generate(run_dir.path)
-            console.print(f"\n📊 Report: [bold]{report_path}[/bold]")
+            console.print(f"\nReport: [bold]{report_path}[/bold]")
+
+            if json_summary:
+                summary = {
+                    "run_id": run_dir.run_id,
+                    "run_dir": str(run_dir.path),
+                    "report": str(report_path),
+                    "run_type": suite_config.run_type,
+                    "target_id": target_instance.target_id,
+                    "provider_id": provider_id,
+                    "runs_completed": stats["run_count"],
+                    "unique_failures": stats["corpus"]["unique_failures"],
+                    "total_cost_usd": round(stats.get("total_cost_usd", 0), 6),
+                }
+                console.print(json.dumps(summary, sort_keys=True))
 
             # Cleanup poisoned chunks if poison mode was used
             if poison and isinstance(target_instance, JRAutoRAGTarget):
                 try:
                     await target_instance.delete_by_tag("run_id", run_dir.run_id)
                     console.print(
-                        f"✅ Cleaned up poisoned chunks tagged with run_id: {run_dir.run_id}"
+                        f"OK Cleaned up poisoned chunks tagged with run_id: {run_dir.run_id}"
                     )
                 except Exception as e:
-                    console.print(f"⚠️  Warning: Could not clean up poisoned chunks: {e}")
+                    console.print(f"WARN Could not clean up poisoned chunks: {e}")
 
         except FileNotFoundError as e:
-            console.print(f"❌ File not found: [red]{e}[/red]")
+            console.print(f"ERROR File not found: [red]{e}[/red]")
             raise typer.Exit(1) from e
         except Exception as e:
-            console.print(f"❌ Error: [red]{e}[/red]")
+            console.print(f"ERROR [red]{e}[/red]")
             raise typer.Exit(1) from e
         finally:
             await close_client()
@@ -523,6 +604,7 @@ def report(
     run_dir_path: str = typer.Argument(..., help="Path to run directory"),
     html: bool = typer.Option(True, "--html/--no-html", help="Generate HTML report"),
     md: bool = typer.Option(False, "--md", help="Generate Markdown report"),
+    json_out: bool = typer.Option(False, "--json", help="Print report summary as JSON"),
 ) -> None:
     """Generate a report from run results."""
 
@@ -530,19 +612,24 @@ def report(
         run_dir = Path(run_dir_path)
 
         if not run_dir.exists():
-            console.print(f"❌ Run directory not found: [red]{run_dir_path}[/red]")
+            console.print(f"ERROR Run directory not found: [red]{run_dir_path}[/red]")
             raise typer.Exit(1)
 
+        reporter = HTMLReporter()
+
         if html:
-            reporter = HTMLReporter()
             report_path = reporter.generate(run_dir)
-            console.print(f"✅ HTML report generated: [bold]{report_path}[/bold]")
+            console.print(f"OK HTML report generated: [bold]{report_path}[/bold]")
 
         if md:
-            console.print("[yellow]Markdown report generation not yet implemented.[/yellow]")
+            md_path = reporter.generate_markdown(run_dir)
+            console.print(f"OK Markdown report generated: [bold]{md_path}[/bold]")
+
+        if json_out:
+            console.print(json.dumps(reporter.summarize(run_dir), sort_keys=True))
 
     except Exception as e:
-        console.print(f"❌ Error: [red]{e}[/red]")
+        console.print(f"ERROR [red]{e}[/red]")
         raise typer.Exit(1) from e
 
 
@@ -564,7 +651,7 @@ def replay(
             provider_config = config.get_provider(provider_id)
 
             if not provider_config:
-                console.print(f"❌ Provider '{provider_id}' not found")
+                console.print(f"ERROR Provider '{provider_id}' not found")
                 raise typer.Exit(1)
 
             api_key = config.get_api_key(provider_id)
@@ -573,8 +660,17 @@ def replay(
                 base_url=provider_config.base_url,
                 api_key=api_key,
             )
+            resolved_model = await _resolve_provider_model(
+                provider_id,
+                provider_config.default_model,
+                provider_instance,
+            )
 
-            target = ChatTarget(target_id="chat", provider=provider_instance)
+            target = ChatTarget(
+                target_id="chat",
+                provider=provider_instance,
+                default_model=resolved_model,
+            )
 
             console.print(f"Replaying case: [bold]{case_data.get('case_id', 'unknown')}[/bold]")
             console.print(f"Input: {case_data.get('inputs', {})}")
@@ -585,7 +681,7 @@ def replay(
             console.print(response.content)
 
         except Exception as e:
-            console.print(f"❌ Error: [red]{e}[/red]")
+            console.print(f"ERROR [red]{e}[/red]")
             raise typer.Exit(1) from e
         finally:
             await close_client()
@@ -606,7 +702,7 @@ def cache_cleanup(
         cache.cleanup_old(max_age_seconds=max_age)
         final_stats = cache.get_stats()
 
-        console.print("✅ Cache cleanup completed")
+        console.print("OK Cache cleanup completed")
         console.print(f"  Entries before: {initial_stats['total_entries']}")
         console.print(f"  Entries after: {final_stats['total_entries']}")
         console.print(
@@ -620,7 +716,7 @@ def cache_cleanup(
         console.print("Run [bold]ragfuzz init[/bold] to create a configuration.")
         raise typer.Exit(1) from None
     except Exception as e:
-        console.print(f"❌ Error: [red]{e}[/red]")
+        console.print(f"ERROR [red]{e}[/red]")
         raise typer.Exit(1) from e
 
 
@@ -639,7 +735,7 @@ def corpus_stats(
         cases_jsonl = run_dir / "cases.jsonl"
 
         if not cases_jsonl.exists():
-            console.print("❌ cases.jsonl not found in run directory")
+            console.print("ERROR cases.jsonl not found in run directory")
             raise typer.Exit(1)
 
         corpus = Corpus()
@@ -680,7 +776,7 @@ def corpus_stats(
 
         stats = corpus.get_stats()
 
-        console.print(f"📊 Corpus Statistics for: [bold]{run_dir_path}[/bold]")
+        console.print(f"Corpus Statistics for: [bold]{run_dir_path}[/bold]")
         console.print(f"  Total entries: {stats['total_entries']}")
         console.print(f"  Unique failures: {stats['unique_failures']}")
         console.print(f"  Average energy: {stats['avg_energy']:.3f}")
@@ -688,7 +784,7 @@ def corpus_stats(
         console.print(f"  High energy entries: {stats['high_energy_count']}")
 
     except Exception as e:
-        console.print(f"❌ Error: [red]{e}[/red]")
+        console.print(f"ERROR [red]{e}[/red]")
         raise typer.Exit(1) from e
 
 
@@ -710,7 +806,7 @@ def bisect(
         console.print(report)
 
     except Exception as e:
-        console.print(f"❌ Error: [red]{e}[/red]")
+        console.print(f"ERROR [red]{e}[/red]")
         raise typer.Exit(1) from e
 
 
@@ -727,16 +823,59 @@ def viz(
 
         if output and format == "mermaid":
             visualizer.save_mermaid(case_path, output)
-            console.print(f"✅ Mermaid diagram saved to [bold]{output}[/bold]")
+            console.print(f"OK Mermaid diagram saved to [bold]{output}[/bold]")
         else:
             console.print(result)
 
     except FileNotFoundError as e:
-        console.print(f"❌ File not found: [red]{e}[/red]")
+        console.print(f"ERROR File not found: [red]{e}[/red]")
         raise typer.Exit(1) from e
     except Exception as e:
-        console.print(f"❌ Error: [red]{e}[/red]")
+        console.print(f"ERROR [red]{e}[/red]")
         raise typer.Exit(1) from e
+
+
+def _is_http_url(value: str) -> bool:
+    """Return True when a URL is an HTTP or HTTPS URL."""
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _select_chat_model(provider_id: str, configured_model: str, models: list[str]) -> str:
+    """Select a usable chat model from provider models."""
+    if not models:
+        raise ValueError(f"Provider '{provider_id}' returned no models")
+    if configured_model != "auto" and configured_model in models:
+        return configured_model
+
+    chat_models = [
+        model
+        for model in models
+        if "embed" not in model.lower() and "rerank" not in model.lower()
+    ]
+    return chat_models[0] if chat_models else models[0]
+
+
+async def _resolve_provider_model(
+    provider_id: str,
+    configured_model: str,
+    provider: OpenAICompatProvider,
+) -> str:
+    """Resolve the configured provider model, including local auto selection."""
+    if configured_model != "auto":
+        return configured_model
+    models = await provider.list_models()
+    return _select_chat_model(provider_id, configured_model, models)
+
+
+def _setup_scorer(scoring_mode: str | None, provider: OpenAICompatProvider) -> Scorer:
+    """Create the scorer requested by the suite or CLI."""
+    mode = scoring_mode or "heuristic"
+    if mode == "heuristic":
+        return HeuristicScorer()
+    if mode == "judge":
+        return JudgeScorer(judge_provider=provider)
+    raise ValueError("scoring mode must be heuristic or judge")
 
 
 def _setup_mutators(
