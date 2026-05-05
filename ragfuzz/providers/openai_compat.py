@@ -19,7 +19,7 @@ from ragfuzz.utils import get_async_client
 
 
 class OpenAICompatProvider(Provider):
-    """Provider for OpenAI-compatible endpoints (LM Studio, Ollama, OpenRouter)."""
+    """Provider for OpenAI-compatible endpoints such as LM Studio, Ollama, and vLLM."""
 
     def __init__(
         self,

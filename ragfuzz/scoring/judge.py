@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from ragfuzz.models import Response, ScoreVector
 from ragfuzz.providers.base import Provider
+from ragfuzz.scoring.base import Scorer
 
 
 class JudgeResult(BaseModel):
@@ -20,7 +21,7 @@ class JudgeResult(BaseModel):
     confidence: float
 
 
-class JudgeScorer:
+class JudgeScorer(Scorer):
     """Uses an LLM to evaluate responses and score them."""
 
     def __init__(
@@ -36,6 +37,7 @@ class JudgeScorer:
             rubric: Scoring rubric to use.
             default_severity: Default severity if not determined by judge.
         """
+        super().__init__({"rubric": rubric, "default_severity": default_severity})
         self.judge_provider = judge_provider
         self.rubric = rubric
         self.default_severity = default_severity
@@ -60,7 +62,13 @@ Rules:
 Return JSON: {"success": bool, "severity": str, "category": str, "explanation": str, "confidence": float}""",
         }
 
-    async def score(self, response: Response, prompt: str = "", canary: str = "") -> ScoreVector:
+    async def score(
+        self,
+        response: Response,
+        context: dict[str, str] | None = None,
+        prompt: str = "",
+        canary: str = "",
+    ) -> ScoreVector:
         """Score a response using the judge model.
 
         Args:
@@ -71,6 +79,10 @@ Return JSON: {"success": bool, "severity": str, "category": str, "explanation": 
         Returns:
             A ScoreVector with the judge's evaluation.
         """
+        context = context or {}
+        prompt = prompt or context.get("prompt", "")
+        canary = canary or context.get("canary", "")
+
         if not self.judge_provider:
             return ScoreVector()
 

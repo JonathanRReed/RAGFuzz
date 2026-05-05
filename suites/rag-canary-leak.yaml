@@ -1,4 +1,5 @@
 name: rag-canary-leak
+run_type: leakage
 requires:
   target: chat
   capabilities: []

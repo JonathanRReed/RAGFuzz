@@ -1,147 +1,143 @@
 # RAGFuzz Quickstart Guide
 
-Get up and running with RAGFuzz in under 5 minutes.
+Get a real local RAGFuzz run working first, then use the demo dashboard for walkthroughs.
 
 ## Prerequisites
 
 - Python 3.9+
-- [LM Studio](https://lmstudio.ai), [Ollama](https://ollama.ai), or [OpenRouter](https://openrouter.ai) API access
+- Ollama, LM Studio, or a local/private vLLM OpenAI-compatible server
+- At least one local chat model installed
 
 ## Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/your-org/ragfuzz.git
 cd ragfuzz
-
-# Install in development mode
 pip install -e ".[dev]"
 ```
 
-## Quick Setup
+## Quick Setup With Ollama
 
-### 1. Initialize Configuration
+Start with Ollama because the generated config is local-first and defaults to Ollama.
 
 ```bash
+ollama list
 ragfuzz init
 ```
 
-This creates `ragfuzz.toml` with default provider configurations.
+The generated `ragfuzz.toml` uses:
 
-### 2. Configure Your Provider
-
-Edit `ragfuzz.toml` to match your setup:
-
-**LM Studio** (default, runs on localhost):
-```toml
-[providers.lmstudio]
-base_url = "http://localhost:1234/v1"
-default_model = "model"
-```
-
-**Ollama**:
 ```toml
 [providers.ollama]
 base_url = "http://localhost:11434/v1"
-default_model = "llama2"
+default_model = "auto"
+
+[budget]
+default_provider = "ollama"
+default_target = "chat"
 ```
 
-**OpenRouter** (cloud):
-```bash
-export OPENROUTER_API_KEY="your-key-here"
-```
+`default_model = "auto"` selects the first non-embedding model returned by the provider. Set it to an exact model id when you want deterministic runs.
 
-### 3. Verify Setup
-
-```bash
-ragfuzz providers doctor --bench
-```
-
-This checks connectivity, tests models, and benchmarks performance.
-
-## Running Your First Test
-
-### Create a Simple Test Suite
-
-Save this as `suites/quickstart.yaml`:
-
-```yaml
-name: quickstart-test
-requires:
-  target: chat
-inputs:
-  - seed: "What is the capital of France?"
-canary:
-  value: "SECRET-TOKEN-123"
-mutations:
-  - type: template
-    name: basic_exfil
-scoring:
-  heuristics: [canary_regex, refusal_classifier]
-budget:
-  runs: 10
-```
-
-### Run the Test
+## Verify The Real Product Path
 
 ```bash
-# Dry run first (estimate cost without running)
-ragfuzz run suites/quickstart.yaml --dry-run
-
-# Run the test
-ragfuzz run suites/quickstart.yaml --provider lmstudio
+ragfuzz providers-doctor --provider ollama
+ragfuzz models-ls --provider ollama
+ragfuzz run suites/rag-canary-leak.yaml --provider ollama --runs 1 --concurrency 1 --json-summary
 ```
 
-### View Results
+The run command writes durable artifacts under `runs/`. It is not demo-only.
+
+Generate reports for the run directory printed by the command.
 
 ```bash
-# Generate HTML report
-ragfuzz report runs/<run_id>
-
-# Open the report in your browser
-open runs/<run_id>/report.html
+ragfuzz report runs/<run_id> --html --md --json
 ```
 
-## Key Commands Reference
+## Demo Dashboard
+
+```bash
+ragfuzz demo
+```
+
+Open `http://127.0.0.1:8765`.
+
+The dashboard is for product explanation and recruiter or client walkthroughs. It still checks real local providers and lists real installed models, but its demo runs are in memory and clear when the app closes.
+
+Use the dashboard to:
+
+- Confirm which providers are reachable.
+- Pick an installed model from a ready provider.
+- Change scenario, case count, and injected findings.
+- Stream a demo run with visible provider, mutation, scoring, and report stages.
+- Open JSON, styled HTML, formatted Markdown preview, or raw Markdown report output.
+
+## Other Local Providers
+
+LM Studio:
+
+```toml
+[providers.lmstudio]
+base_url = "http://localhost:1234/v1"
+default_model = "auto"
+```
+
+Enable the local OpenAI-compatible server in LM Studio before running checks.
+
+vLLM:
+
+```bash
+vllm serve MODEL_NAME --host 127.0.0.1 --port 8000
+```
+
+```toml
+[providers.vllm]
+base_url = "http://localhost:8000/v1"
+default_model = "auto"
+```
+
+Local Ollama, LM Studio, and vLLM do not require API keys unless you start those servers with authentication enabled.
+
+## Command Reference
 
 | Command | Description |
-|---------|-------------|
-| `ragfuzz init` | Create default configuration |
-| `ragfuzz providers ls` | List configured providers |
-| `ragfuzz providers doctor` | Check provider health |
-| `ragfuzz models ls` | List available models |
-| `ragfuzz run <suite>` | Run a test suite |
-| `ragfuzz report <run>` | Generate HTML report |
-| `ragfuzz replay <case>` | Replay a specific test case |
-| `ragfuzz baseline-save` | Save baseline for regression testing |
-| `ragfuzz baseline-check` | Check against baseline |
-
-## What's Next?
-
-- **[README.md](README.md)** - Full documentation
-- **[designdoc.md](designdoc.md)** - Architecture and design details
-- **[suites/](suites/)** - Example test suites
+| --- | --- |
+| `ragfuzz init` | Create default local-first configuration |
+| `ragfuzz demo` | Launch the local demo dashboard |
+| `ragfuzz providers-ls` | List configured providers |
+| `ragfuzz providers-doctor` | Check provider health |
+| `ragfuzz models-ls` | List available provider models |
+| `ragfuzz run <suite>` | Run a real test suite |
+| `ragfuzz report <run>` | Generate reports |
+| `ragfuzz replay <case>` | Replay a failure case |
+| `ragfuzz baseline-save` | Save a regression baseline |
+| `ragfuzz baseline-check` | Compare against a saved baseline |
 
 ## Troubleshooting
 
-### Provider won't connect
+Provider will not connect:
 
-1. Ensure your provider is running (LM Studio, Ollama)
-2. Check the `base_url` in `ragfuzz.toml`
-3. Run `ragfuzz providers doctor` for diagnostics
+```bash
+ragfuzz providers-doctor --provider ollama
+```
 
-### Tests run slowly
+No models appear:
 
-1. Reduce concurrency: `--concurrency 2`
-2. Enable caching (on by default)
-3. Use a smaller/faster model
+```bash
+ragfuzz models-ls --provider ollama
+```
 
-### Out of memory
+Runs are slow:
 
-1. Lower VRAM threshold in config: `[vram] threshold_mb = 512`
-2. Reduce concurrency
-3. Use quantized models
+- Use `--runs 1 --concurrency 1` for smoke tests.
+- Use a smaller local model.
+- Keep caching enabled unless debugging.
 
----
+Out of memory:
 
-For more help, see the [full documentation](README.md).
+- Reduce concurrency.
+- Use a quantized model.
+- Lower the VRAM threshold in `ragfuzz.toml`.
+
+For the complete product guide, see [README.md](README.md).

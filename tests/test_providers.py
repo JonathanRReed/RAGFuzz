@@ -68,8 +68,13 @@ class TestConfig:
         assert config_path.exists()
         assert "lmstudio" in config.providers
         assert "ollama" in config.providers
+        assert "vllm" in config.providers
         assert config.providers["lmstudio"].base_url == "http://localhost:1234/v1"
         assert config.providers["ollama"].base_url == "http://localhost:11434/v1"
+        assert config.providers["vllm"].base_url == "http://localhost:8000/v1"
+        assert config.providers["lmstudio"].default_model == "local-model"
+        assert config.providers["ollama"].default_model == "auto"
+        assert config.default_provider == "ollama"
 
     def test_load_config(self, temp_config: Path) -> None:
         """Test loading configuration from file."""

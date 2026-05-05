@@ -67,20 +67,17 @@ class Provider:
             True if healthy, False otherwise.
         """
         try:
-            await self.chat(
-                messages=[Message(role="user", content="test")],
-                model="model",
-                max_tokens=1,
-            )
-            return True
+            models = await self.list_models()
+            return bool(models)
         except Exception:
             return False
 
-    async def benchmark(self, num_requests: int = 5) -> dict[str, float]:
+    async def benchmark(self, num_requests: int = 5, model: str = "model") -> dict[str, float]:
         """Run a micro-benchmark to estimate performance.
 
         Args:
             num_requests: Number of requests to run.
+            model: Provider model identifier to benchmark.
 
         Returns:
             Dictionary with performance metrics.
@@ -94,7 +91,7 @@ class Provider:
             start = time.time()
             response = await self.chat(
                 messages=[Message(role="user", content="Say hello")],
-                model="model",
+                model=model,
                 max_tokens=10,
             )
             end = time.time()

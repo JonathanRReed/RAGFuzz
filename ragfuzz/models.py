@@ -42,6 +42,9 @@ class ScoreVector(BaseModel):
     refusal_latency_delta: float = 0.0
     tool_error_rate: float = 0.0
     retrieval_poison_influence: float = 0.0
+    faithfulness_score: float = 0.0
+    retrieval_relevance_score: float = 0.0
+    leakage_score: float = 0.0
 
 
 class Case(BaseModel):
@@ -50,6 +53,10 @@ class Case(BaseModel):
     case_id: str
     run_id: str
     suite_id: str
+    run_type: str = "prompt-injection"
+    target_id: str = "chat"
+    provider_id: str = ""
+    model_id: str = ""
     inputs: dict[str, Any]
     mutation_trace: list[str] = Field(default_factory=list)
     target_response: Response | None = None

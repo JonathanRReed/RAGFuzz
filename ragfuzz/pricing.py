@@ -2,48 +2,26 @@
 
 from __future__ import annotations
 
-# Default pricing per 1K tokens
-# These are fallback values used when provider-specific pricing is not available
+# Default local pricing per 1K tokens.
+# Local providers do not bill through RAGFuzz, so the default estimate is zero.
 DEFAULT_PRICING = {
-    "prompt_per_1k": 0.00001,
-    "completion_per_1k": 0.00003,
+    "prompt_per_1k": 0.0,
+    "completion_per_1k": 0.0,
 }
 
 # Provider-specific pricing data
-# Prices are approximate and should be updated based on current rates
 PROVIDER_PRICING = {
-    # LM Studio - depends on the model being used
     "lmstudio": {
-        "prompt_per_1k": 0.00001,
-        "completion_per_1k": 0.00003,
+        "prompt_per_1k": 0.0,
+        "completion_per_1k": 0.0,
     },
-    # Ollama - typically free/local
     "ollama": {
         "prompt_per_1k": 0.0,
         "completion_per_1k": 0.0,
     },
-    # OpenRouter - varies by model
-    "openrouter": {
-        "anthropic/claude-sonnet-4": {
-            "prompt_per_1k": 0.003,
-            "completion_per_1k": 0.015,
-        },
-        "anthropic/claude-3.5-sonnet": {
-            "prompt_per_1k": 0.0015,
-            "completion_per_1k": 0.0075,
-        },
-        "openai/gpt-4": {
-            "prompt_per_1k": 0.03,
-            "completion_per_1k": 0.06,
-        },
-        "openai/gpt-3.5-turbo": {
-            "prompt_per_1k": 0.0005,
-            "completion_per_1k": 0.0015,
-        },
-        "meta-llama/llama-3-70b-instruct": {
-            "prompt_per_1k": 0.0007,
-            "completion_per_1k": 0.0007,
-        },
+    "vllm": {
+        "prompt_per_1k": 0.0,
+        "completion_per_1k": 0.0,
     },
 }
 
