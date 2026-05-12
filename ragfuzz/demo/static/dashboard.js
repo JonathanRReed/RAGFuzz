@@ -6,8 +6,13 @@
     const statusStrip = document.getElementById("status-strip");
     const stageList = document.getElementById("stage-list");
     const scenarioSelect = document.getElementById("scenario-select");
+    const scenarioSummary = document.getElementById("scenario-summary");
     const caseCount = document.getElementById("case-count");
     const failureCount = document.getElementById("failure-count");
+    const streamEvents = document.getElementById("stream-events");
+    const streamProgressLabel = document.getElementById("stream-progress-label");
+    const streamProgressBar = document.getElementById("stream-progress-bar");
+    const guidedRunButton = document.querySelector("[data-action='start-onboarding-run']");
 
     function appendLog(line) {
         if (!streamLog) {
@@ -24,6 +29,45 @@
         }
     }
 
+    function resetStreamUI() {
+        setLog("Connecting to streaming run...");
+        if (streamEvents) {
+            streamEvents.replaceChildren(
+                eventCard("Connecting", "Opening a local event stream for the selected scenario.", "neutral"),
+            );
+        }
+        updateProgress(0, "Connecting");
+    }
+
+    function updateProgress(percent, label) {
+        if (streamProgressLabel) {
+            streamProgressLabel.textContent = label;
+        }
+        if (streamProgressBar) {
+            streamProgressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+        }
+    }
+
+    function appendEventCard(label, body, tone, meta) {
+        if (!streamEvents) {
+            return;
+        }
+        const empty = streamEvents.querySelector(".event-empty");
+        if (empty) {
+            empty.remove();
+        }
+        streamEvents.prepend(eventCard(label, body, tone, meta));
+    }
+
+    function eventCard(label, body, tone, meta) {
+        const card = el("article", { className: `event-card event-${tone || "neutral"}` });
+        card.append(el("span", { text: label }), el("strong", { text: body }));
+        if (meta) {
+            card.append(el("p", { text: meta }));
+        }
+        return card;
+    }
+
     function setStage(stage) {
         if (!stageList) {
             return;
@@ -34,6 +78,28 @@
                 item.classList.add("complete");
             }
         });
+    }
+
+    function updateScenarioSummary() {
+        if (!scenarioSelect || !scenarioSummary) {
+            return;
+        }
+        const option = scenarioSelect.selectedOptions[0];
+        if (!option) {
+            return;
+        }
+        const values = [
+            ["Objective", option.dataset.objective || ""],
+            ["Technique", option.dataset.technique || ""],
+            ["OWASP map", option.dataset.owasp || ""],
+        ];
+        scenarioSummary.replaceChildren(
+            ...values.map(([label, value]) => {
+                const item = el("div");
+                item.append(el("span", { text: label }), el("strong", { text: value }));
+                return item;
+            }),
+        );
     }
 
     async function refreshStatus() {
@@ -262,7 +328,7 @@
     }
 
     function startStream() {
-        setLog("Connecting to streaming run...");
+        resetStreamUI();
         const params = new URLSearchParams({
             scenario: scenarioSelect ? scenarioSelect.value : "leakage",
             cases: clampNumber(caseCount ? caseCount.value : 5, 1, 12),
@@ -275,18 +341,36 @@
             startButton.disabled = true;
             startButton.textContent = "Running...";
         }
+        if (guidedRunButton) {
+            guidedRunButton.disabled = true;
+            guidedRunButton.textContent = "Running...";
+        }
 
         source.addEventListener("start", (event) => {
             const data = JSON.parse(event.data);
             setLog(
-                `Run ${data.run_id} started. Scenario: ${data.scenario}. Cases: ${data.cases}. Injected findings: ${data.failures}.`,
+                `Run ${data.run_id} started. Scenario: ${data.label || data.scenario}. Cases: ${data.cases}. Injected findings: ${data.failures}.`,
             );
+            appendEventCard(
+                "Run started",
+                `${data.label || data.scenario}: ${data.objective || "Scenario ready."}`,
+                "running",
+                `${data.cases} cases, ${data.failures} injected findings, ${data.owasp || "OWASP map unavailable"}`,
+            );
+            updateProgress(8, "Provider check");
             setStage("provider");
         });
 
         source.addEventListener("progress", (event) => {
             const data = JSON.parse(event.data);
             setStage(data.step < data.total ? "mutate" : "score");
+            updateProgress(Math.round((data.step / data.total) * 82) + 10, `Case ${data.step}/${data.total}`);
+            appendEventCard(
+                data.finding,
+                `${data.case_id}: leak ${data.leak_score}, policy ${data.policy_violation_score}`,
+                data.finding.includes("withheld") || data.finding.includes("ignored") || data.finding.includes("grounded") || data.finding.includes("contained") ? "pass" : "finding",
+                `${data.risk || "Risk"} | ${data.owasp || "OWASP"} | ${data.technique || "Technique unavailable"}`,
+            );
             appendLog(
                 `Step ${data.step}/${data.total}: ${data.case_id} | ${data.finding} | leak ${data.leak_score} | policy ${data.policy_violation_score}`,
             );
@@ -295,9 +379,16 @@
         source.addEventListener("provider", (event) => {
             const data = JSON.parse(event.data);
             if (data.status === "ready") {
+                appendEventCard(
+                    "Provider ready",
+                    `${data.provider_id} answered with ${data.model}.`,
+                    "pass",
+                    data.response || data.message,
+                );
                 appendLog(`Provider check: ${data.provider_id} answered with ${data.model}.`);
                 appendLog(`Sample response: ${data.response || data.message}`);
             } else {
+                appendEventCard("Provider fallback", data.message, "neutral");
                 appendLog(`Provider check: ${data.message}`);
             }
         });
@@ -306,11 +397,22 @@
             const data = JSON.parse(event.data);
             completed = true;
             setStage("report");
+            updateProgress(100, "Report ready");
+            appendEventCard(
+                "Report ready",
+                `${data.run.run_id}: ${data.run.summary.failure_count} findings across ${data.run.summary.total_cases} cases.`,
+                "pass",
+                "Open the JSON, HTML, or Markdown report from Recent runs.",
+            );
             appendLog(`Run ${data.run.run_id} completed.`);
             source.close();
             if (startButton) {
                 startButton.disabled = false;
                 startButton.textContent = "Start demo run";
+            }
+            if (guidedRunButton) {
+                guidedRunButton.disabled = false;
+                guidedRunButton.textContent = "Run guided demo";
             }
             await refreshStatus();
             await refreshRuns();
@@ -320,11 +422,17 @@
             if (completed) {
                 return;
             }
+            updateProgress(0, "Disconnected");
+            appendEventCard("Stream disconnected", "The local event stream closed before the run completed.", "finding");
             appendLog("Stream disconnected.");
             source.close();
             if (startButton) {
                 startButton.disabled = false;
                 startButton.textContent = "Start demo run";
+            }
+            if (guidedRunButton) {
+                guidedRunButton.disabled = false;
+                guidedRunButton.textContent = "Run guided demo";
             }
         };
     }
@@ -333,6 +441,18 @@
         startButton.addEventListener("click", () => {
             startStream();
         });
+    }
+
+    if (guidedRunButton) {
+        guidedRunButton.addEventListener("click", () => {
+            document.getElementById("stream")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            startStream();
+        });
+    }
+
+    if (scenarioSelect) {
+        scenarioSelect.addEventListener("change", updateScenarioSummary);
+        updateScenarioSummary();
     }
 
     function clampNumber(value, min, max) {

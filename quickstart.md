@@ -13,7 +13,7 @@ Get a real local RAGFuzz run working first, then use the demo dashboard for walk
 ```bash
 git clone https://github.com/your-org/ragfuzz.git
 cd ragfuzz
-pip install -e ".[dev]"
+uv sync --all-extras --dev
 ```
 
 ## Quick Setup With Ollama
@@ -22,7 +22,7 @@ Start with Ollama because the generated config is local-first and defaults to Ol
 
 ```bash
 ollama list
-ragfuzz init
+uv run ragfuzz init
 ```
 
 The generated `ragfuzz.toml` uses:
@@ -42,9 +42,9 @@ default_target = "chat"
 ## Verify The Real Product Path
 
 ```bash
-ragfuzz providers-doctor --provider ollama
-ragfuzz models-ls --provider ollama
-ragfuzz run suites/rag-canary-leak.yaml --provider ollama --runs 1 --concurrency 1 --json-summary
+uv run ragfuzz providers-doctor --provider ollama
+uv run ragfuzz models-ls --provider ollama
+uv run ragfuzz run suites/rag-canary-leak.yaml --provider ollama --runs 1 --concurrency 1 --json-summary
 ```
 
 The run command writes durable artifacts under `runs/`. It is not demo-only.
@@ -52,13 +52,13 @@ The run command writes durable artifacts under `runs/`. It is not demo-only.
 Generate reports for the run directory printed by the command.
 
 ```bash
-ragfuzz report runs/<run_id> --html --md --json
+uv run ragfuzz report runs/<run_id> --html --md --json
 ```
 
 ## Demo Dashboard
 
 ```bash
-ragfuzz demo
+uv run ragfuzz demo
 ```
 
 Open `http://127.0.0.1:8765`.
@@ -119,13 +119,13 @@ Local Ollama, LM Studio, and vLLM do not require API keys unless you start those
 Provider will not connect:
 
 ```bash
-ragfuzz providers-doctor --provider ollama
+uv run ragfuzz providers-doctor --provider ollama
 ```
 
 No models appear:
 
 ```bash
-ragfuzz models-ls --provider ollama
+uv run ragfuzz models-ls --provider ollama
 ```
 
 Runs are slow:

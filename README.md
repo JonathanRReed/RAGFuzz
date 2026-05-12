@@ -29,12 +29,13 @@ Cloud provider setup is not required for the normal local workflow.
 ```bash
 git clone https://github.com/your-org/ragfuzz.git
 cd ragfuzz
-pip install -e ".[dev]"
+uv sync --all-extras --dev
 ```
 
 Requirements:
 
 - Python 3.9 or newer
+- uv
 - One local model server, usually Ollama, LM Studio, or vLLM
 
 ## Quick Start With Ollama
@@ -48,7 +49,7 @@ ollama list
 Create the local config.
 
 ```bash
-ragfuzz init
+uv run ragfuzz init
 ```
 
 The default config uses Ollama and `default_model = "auto"`, so RAGFuzz selects the first non-embedding model returned by the provider.
@@ -56,26 +57,26 @@ The default config uses Ollama and `default_model = "auto"`, so RAGFuzz selects 
 Verify the provider.
 
 ```bash
-ragfuzz providers-doctor --provider ollama
-ragfuzz models-ls --provider ollama
+uv run ragfuzz providers-doctor --provider ollama
+uv run ragfuzz models-ls --provider ollama
 ```
 
 Run a real one-case smoke test.
 
 ```bash
-ragfuzz run suites/rag-canary-leak.yaml --provider ollama --runs 1 --concurrency 1 --json-summary
+uv run ragfuzz run suites/rag-canary-leak.yaml --provider ollama --runs 1 --concurrency 1 --json-summary
 ```
 
 Generate reports for the run directory printed by the command.
 
 ```bash
-ragfuzz report runs/YOUR_RUN_ID --html --md --json
+uv run ragfuzz report runs/YOUR_RUN_ID --html --md --json
 ```
 
 Replay a saved failure case.
 
 ```bash
-ragfuzz replay runs/YOUR_RUN_ID/failures/CASE_ID.json --provider ollama
+uv run ragfuzz replay runs/YOUR_RUN_ID/failures/CASE_ID.json --provider ollama
 ```
 
 ## Demo App
@@ -83,7 +84,7 @@ ragfuzz replay runs/YOUR_RUN_ID/failures/CASE_ID.json --provider ollama
 Launch the local product demo.
 
 ```bash
-ragfuzz demo
+uv run ragfuzz demo
 ```
 
 Open `http://127.0.0.1:8765` if the browser does not open automatically.
@@ -204,24 +205,31 @@ Supported run types:
 - `leakage`
 - `multi-turn`
 
+Included research-backed starter suites:
+
+- `suites/rag-canary-leak.yaml`, canary leakage and vector weakness checks.
+- `suites/rag-indirect-prompt-injection.yaml`, indirect prompt injection from untrusted retrieved content.
+- `suites/rag-retrieval-conflict.yaml`, SafeRAG and RARE-style noisy retrieval, stale context, and inter-context conflict checks.
+- `suites/rag-poisoned-knowledge.yaml`, poisoned knowledge and source-trust influence checks.
+
 ## CLI Reference
 
 ```bash
-ragfuzz init [CONFIG_PATH]
-ragfuzz demo [--host 127.0.0.1] [--port 8765] [--no-open]
-ragfuzz providers-ls
-ragfuzz providers-doctor [--provider PROVIDER] [--bench]
-ragfuzz models-ls [--provider PROVIDER]
-ragfuzz check-api URL [--headers JSON]
-ragfuzz run SUITE --provider PROVIDER [--runs N] [--concurrency N] [--dry-run] [--json-summary]
-ragfuzz report RUN_DIR [--html] [--md] [--json]
-ragfuzz replay CASE_JSON --provider PROVIDER
-ragfuzz baseline-save RUN_DIR NAME
-ragfuzz baseline-check RUN_DIR NAME
-ragfuzz cache-cleanup [--max-age SECONDS]
-ragfuzz corpus-stats RUN_DIR
-ragfuzz bisect RUN_A RUN_B
-ragfuzz viz CASE_JSON [--format ascii|mermaid] [--output PATH]
+uv run ragfuzz init [CONFIG_PATH]
+uv run ragfuzz demo [--host 127.0.0.1] [--port 8765] [--no-open]
+uv run ragfuzz providers-ls
+uv run ragfuzz providers-doctor [--provider PROVIDER] [--bench]
+uv run ragfuzz models-ls [--provider PROVIDER]
+uv run ragfuzz check-api URL [--headers JSON]
+uv run ragfuzz run SUITE --provider PROVIDER [--runs N] [--concurrency N] [--dry-run] [--json-summary]
+uv run ragfuzz report RUN_DIR [--html] [--md] [--json]
+uv run ragfuzz replay CASE_JSON --provider PROVIDER
+uv run ragfuzz baseline-save RUN_DIR NAME
+uv run ragfuzz baseline-check RUN_DIR NAME
+uv run ragfuzz cache-cleanup [--max-age SECONDS]
+uv run ragfuzz corpus-stats RUN_DIR
+uv run ragfuzz bisect RUN_A RUN_B
+uv run ragfuzz viz CASE_JSON [--format ascii|mermaid] [--output PATH]
 ```
 
 ## Reports
@@ -241,8 +249,8 @@ Run reports include:
 Use a small run count for pull requests.
 
 ```bash
-ragfuzz providers-doctor --provider ollama
-ragfuzz run suites/rag-canary-leak.yaml --provider ollama --runs 1 --concurrency 1 --json-summary
+uv run ragfuzz providers-doctor --provider ollama
+uv run ragfuzz run suites/rag-canary-leak.yaml --provider ollama --runs 1 --concurrency 1 --json-summary
 ```
 
 The JSON summary is stable enough for CI parsing and baseline comparison.
@@ -262,18 +270,24 @@ RAGFuzz is shaped by current RAG evaluation and LLM security work:
 - [garak](https://github.com/NVIDIA/garak)
 - [DeepEval](https://github.com/confident-ai/deepeval)
 
+For the current research and peer-tool upgrade map, see
+[docs/research/ragfuzz-research-and-peer-audit-2026-05-12.md](docs/research/ragfuzz-research-and-peer-audit-2026-05-12.md).
+
+For production-readiness checks and remaining risks, see
+[docs/audits/production-readiness-2026-05-12.md](docs/audits/production-readiness-2026-05-12.md).
+
 ## Troubleshooting
 
 Provider is offline:
 
 ```bash
-ragfuzz providers-doctor --provider ollama
+uv run ragfuzz providers-doctor --provider ollama
 ```
 
 No models appear:
 
 ```bash
-ragfuzz models-ls --provider ollama
+uv run ragfuzz models-ls --provider ollama
 ```
 
 LM Studio is not ready:

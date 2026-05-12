@@ -447,7 +447,13 @@ def run(
             run_dir.write_run_config(
                 config,
                 suite_config,
-                extra={"run_type": suite_config.run_type, "provider_id": provider_id},
+                extra={
+                    "run_type": suite_config.run_type,
+                    "provider_id": provider_id,
+                    "owasp": suite_config.owasp,
+                    "research": suite_config.research,
+                    "risk_tags": suite_config.risk_tags,
+                },
             )
 
             num_runs = runs or suite_config.budget.get("runs", 100)
@@ -528,6 +534,9 @@ def run(
                     suite_context={
                         "canary": suite_config.canary.get("value"),
                         "run_type": suite_config.run_type,
+                        "owasp": suite_config.owasp,
+                        "research": suite_config.research,
+                        "risk_tags": suite_config.risk_tags,
                     },
                 )
 
@@ -569,6 +578,9 @@ def run(
                     "run_dir": str(run_dir.path),
                     "report": str(report_path),
                     "run_type": suite_config.run_type,
+                    "owasp": suite_config.owasp,
+                    "research": suite_config.research,
+                    "risk_tags": suite_config.risk_tags,
                     "target_id": target_instance.target_id,
                     "provider_id": provider_id,
                     "runs_completed": stats["run_count"],
@@ -927,6 +939,12 @@ def _setup_mutators(
             config = mutator_spec.get("config", {})
             mutators.append(
                 StatefulDialogueMutator(name="stateful_dialogue", config=config, provider=provider)
+            )
+
+        elif mutator_type == "poison":
+            mode = mutator_spec.get("mode", "influence")
+            mutators.append(
+                PoisonMutator(name=f"poison_{mode}", config={"mode": mode, "run_id": run_id})
             )
 
     # Default mutator if none specified
