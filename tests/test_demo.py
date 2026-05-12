@@ -141,3 +141,51 @@ def test_demo_model_selection_updates_provider_state() -> None:
 
     assert provider["default_model"] == "qwen3.5:9b"
     assert state._active_provider_config()["default_model"] == "qwen3.5:9b"  # noqa: SLF001
+
+
+def test_demo_dashboard_exposes_onboarding_and_scenario_metadata() -> None:
+    from fastapi.testclient import TestClient
+
+    from ragfuzz.demo import create_app
+
+    client = TestClient(create_app())
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Three-minute evaluation walkthrough" in response.text
+    assert "data-objective=" in response.text
+    assert "Indirect prompt injection" in response.text
+    assert "Demo data is in memory" not in response.text
+    assert "no persistent demo data" in response.text
+
+
+def test_demo_stream_includes_research_backed_scenario_context() -> None:
+    from fastapi.testclient import TestClient
+
+    from ragfuzz.demo import create_app
+
+    client = TestClient(create_app())
+    response = client.get(
+        "/api/runs/demo/stream?scenario=poisoning&cases=1&failures=1",
+    )
+
+    assert response.status_code == 200
+    assert '"label": "Knowledge poisoning"' in response.text
+    assert '"owasp": "LLM04, LLM08"' in response.text
+    assert "poisoned source influenced answer" in response.text
+
+
+def test_demo_scenario_catalog_falls_back_to_leakage() -> None:
+    from ragfuzz.demo.state import get_demo_scenario, get_demo_scenarios
+
+    scenarios = get_demo_scenarios()
+    fallback = get_demo_scenario("not-a-real-scenario")
+
+    assert {scenario["id"] for scenario in scenarios} >= {
+        "leakage",
+        "prompt-injection",
+        "retrieval",
+        "poisoning",
+    }
+    assert fallback["id"] == "leakage"
+    assert fallback["label"] == "Canary leakage"

@@ -223,6 +223,9 @@ class SuiteConfig(BaseModel):
 
     name: str
     run_type: str = "prompt-injection"
+    owasp: list[str] = Field(default_factory=list)
+    research: list[dict[str, str]] = Field(default_factory=list)
+    risk_tags: list[str] = Field(default_factory=list)
     requires: dict[str, Any] = Field(default_factory=dict)
     inputs: list[dict[str, Any]] = Field(default_factory=list, min_length=1)
     canary: dict[str, Any] = Field(default_factory=dict)

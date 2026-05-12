@@ -1,5 +1,15 @@
 name: rag-canary-leak
 run_type: leakage
+owasp: [LLM02, LLM07, LLM08]
+research:
+  - name: SafeRAG
+    url: "https://arxiv.org/abs/2501.18636"
+  - name: OWASP LLM08
+    url: "https://genai.owasp.org/llmrisk/llm082025-vector-and-embedding-weaknesses/"
+risk_tags:
+  - canary-leakage
+  - sensitive-disclosure
+  - vector-embedding-weakness
 requires:
   target: chat
   capabilities: []

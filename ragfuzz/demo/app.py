@@ -21,7 +21,7 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 
-from ragfuzz.demo.state import DemoState
+from ragfuzz.demo.state import DemoState, get_demo_scenario, get_demo_scenarios
 from ragfuzz.models import Message
 from ragfuzz.providers.openai_compat import OpenAICompatProvider
 from ragfuzz.reports import render_html_report, render_markdown_report
@@ -116,6 +116,27 @@ def _render_recent_run_rows(runs: list[dict[str, Any]]) -> str:
             "</tr>"
         )
     return "".join(rows)
+
+
+def _render_scenario_options() -> str:
+    options: list[str] = []
+    for scenario in get_demo_scenarios():
+        options.append(
+            "<option "
+            f"value=\"{escape(scenario['id'])}\" "
+            f"data-objective=\"{escape(scenario['objective'])}\" "
+            f"data-technique=\"{escape(scenario['technique'])}\" "
+            f"data-owasp=\"{escape(scenario['owasp'])}\" "
+            f"data-risk=\"{escape(scenario['risk'])}\">"
+            f"{escape(scenario['label'])}"
+            "</option>"
+        )
+    return "".join(options)
+
+
+def _format_provider_sample_response(content: str) -> str:
+    cleaned = content.replace("<|think|>", "").strip()
+    return cleaned[:240] if cleaned else "Provider accepted the sample prompt."
 
 
 def _render_markdown_preview(markdown: str, run_id: str) -> str:
@@ -370,6 +391,7 @@ def _active_provider(status_data: dict[str, Any]) -> dict[str, Any]:
 def _render_dashboard_page(status_data: dict[str, Any], recent_runs: list[dict[str, Any]]) -> str:
     provider_cards = _render_provider_cards(status_data.get("providers") or [])
     recent_run_rows = _render_recent_run_rows(recent_runs)
+    scenario_options = _render_scenario_options()
     active_run = status_data.get("active_run") or {}
     active_provider = _active_provider(status_data)
     ready = "ready" if status_data.get("ready") else "not-ready"
@@ -380,6 +402,7 @@ def _render_dashboard_page(status_data: dict[str, Any], recent_runs: list[dict[s
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>ragfuzz demo</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23211d1c'/%3E%3Cpath d='M15 18h21c8 0 13 5 13 12 0 5-3 9-8 11l9 12H38l-8-11h-5v11H15V18zm10 9v7h10c3 0 5-1 5-4s-2-3-5-3H25z' fill='%23ff6f83'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="/static/dashboard.css">
     <script defer src="/static/dashboard.js"></script>
 </head>
@@ -392,6 +415,7 @@ def _render_dashboard_page(status_data: dict[str, Any], recent_runs: list[dict[s
                 <p class="brand-subtitle">RAG security evaluation workspace</p>
             </div>
             <nav class="top-nav" aria-label="Primary">
+                <a href="#onboarding">Onboarding</a>
                 <a href="#providers-section">Providers</a>
                 <a href="#stream">Stream</a>
                 <a href="#runs">Reports</a>
@@ -429,6 +453,47 @@ def _render_dashboard_page(status_data: dict[str, Any], recent_runs: list[dict[s
             </div>
         </section>
 
+        <section id="onboarding" class="section onboarding" aria-labelledby="onboarding-heading">
+            <div class="section-head">
+                <div>
+                    <p class="section-kicker">First-run onboarding</p>
+                    <h2 id="onboarding-heading">Three-minute evaluation walkthrough</h2>
+                </div>
+                <p>Built for a live reviewer: choose a scenario, stream the run, open the evidence, then explain the research-backed next steps.</p>
+            </div>
+            <div class="onboarding-layout">
+                <article class="demo-brief">
+                    <div>
+                        <span class="brief-label">Demo mode</span>
+                        <h3>Fast setup, real workflow, no persistent demo data.</h3>
+                        <p>The dashboard probes real local OpenAI-compatible providers, but walkthrough runs stay in memory and clear when the app stops. CLI runs still write durable artifacts under <code>runs/</code>.</p>
+                    </div>
+                    <div class="brief-actions">
+                        <a class="ghost-link" href="#demo-controls-heading">Tune scenario</a>
+                        <button class="secondary-button" type="button" data-action="start-onboarding-run">Run guided demo</button>
+                    </div>
+                </article>
+                <ol class="onboarding-steps">
+                    <li>
+                        <span>1</span>
+                        <div><strong>Confirm local readiness</strong><p>Provider cards show endpoint status, model count, latency, API-key state, and streaming support.</p></div>
+                    </li>
+                    <li>
+                        <span>2</span>
+                        <div><strong>Select a risk scenario</strong><p>Each preset maps the demo to a security outcome and OWASP category.</p></div>
+                    </li>
+                    <li>
+                        <span>3</span>
+                        <div><strong>Watch the stream</strong><p>Case events show mutation, scoring, findings, and the active stage without making users read raw logs.</p></div>
+                    </li>
+                    <li>
+                        <span>4</span>
+                        <div><strong>Open report evidence</strong><p>Recent runs expose redacted JSON, HTML, and Markdown reports for handoff or review.</p></div>
+                    </li>
+                </ol>
+            </div>
+        </section>
+
         <section class="section demo-controls" aria-labelledby="demo-controls-heading">
             <div class="section-head">
                 <div>
@@ -441,10 +506,7 @@ def _render_dashboard_page(status_data: dict[str, Any], recent_runs: list[dict[s
                 <label>
                     <span>Scenario</span>
                     <select id="scenario-select">
-                        <option value="leakage">Leakage</option>
-                        <option value="prompt-injection">Prompt injection</option>
-                        <option value="retrieval">Retrieval robustness</option>
-                        <option value="poisoning">Poisoning</option>
+                        {scenario_options}
                     </select>
                 </label>
                 <label>
@@ -455,6 +517,20 @@ def _render_dashboard_page(status_data: dict[str, Any], recent_runs: list[dict[s
                     <span>Injected findings</span>
                     <input id="failure-count" type="number" min="0" max="12" value="2">
                 </label>
+            </div>
+            <div id="scenario-summary" class="scenario-summary" aria-live="polite">
+                <div>
+                    <span>Objective</span>
+                    <strong>Prove whether a RAG answer can expose seeded confidential tokens.</strong>
+                </div>
+                <div>
+                    <span>Technique</span>
+                    <strong>Canary exfiltration with refusal and partial-success scoring.</strong>
+                </div>
+                <div>
+                    <span>OWASP map</span>
+                    <strong>LLM02, LLM07, LLM08</strong>
+                </div>
             </div>
         </section>
 
@@ -512,7 +588,20 @@ def _render_dashboard_page(status_data: dict[str, Any], recent_runs: list[dict[s
                     </div>
                     <p>Starts a sample run against the current provider and selected model.</p>
                 </div>
-                <pre id="stream-log" class="stream-log">Press Start demo run to stream a sample fuzz run.</pre>
+                <div class="stream-toolbar">
+                    <div>
+                        <span>Progress</span>
+                        <strong id="stream-progress-label">Waiting</strong>
+                    </div>
+                    <div class="progress-track" aria-hidden="true"><span id="stream-progress-bar"></span></div>
+                </div>
+                <div id="stream-events" class="stream-events" aria-live="polite">
+                    <article class="event-card event-empty">
+                        <span>Ready</span>
+                        <strong>Press Start demo run to stream provider checks, case scoring, and report creation.</strong>
+                    </article>
+                </div>
+                <pre id="stream-log" class="stream-log sr-stream-log">Press Start demo run to stream a sample fuzz run.</pre>
             </article>
             <article class="panel">
                 <div class="section-head">
@@ -565,7 +654,13 @@ def _render_dashboard_page(status_data: dict[str, Any], recent_runs: list[dict[s
 """
 
 
-def _build_demo_case(run_id: str, index: int, failure: bool) -> dict[str, Any]:
+def _build_demo_case(
+    run_id: str,
+    index: int,
+    failure: bool,
+    scenario: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    scenario_data = scenario or get_demo_scenario("leakage")
     leak_score = 0.11 + index * 0.03
     policy_score = 0.09 + index * 0.02
     if failure:
@@ -581,7 +676,7 @@ def _build_demo_case(run_id: str, index: int, failure: bool) -> dict[str, Any]:
                 {
                     "role": "user",
                     "content": (
-                        f"Streaming case {index + 1} for {run_id}. "
+                        f"{scenario_data['sample_prompt']} Streaming case {index + 1} for {run_id}. "
                         "Authorization header was redacted before display."
                     ),
                 }
@@ -597,6 +692,12 @@ def _build_demo_case(run_id: str, index: int, failure: bool) -> dict[str, Any]:
         },
         "trace_id": f"trace-{uuid4().hex[:12]}",
         "rag_lens_url": "https://rag-lens.example/trace/demo",
+        "metadata": {
+            "scenario": scenario_data["id"],
+            "risk": scenario_data["risk"],
+            "owasp": scenario_data["owasp"],
+            "finding": scenario_data["failure_finding"] if failure else scenario_data["pass_finding"],
+        },
     }
 
 
@@ -609,20 +710,33 @@ async def _stream_demo_run(
 ) -> AsyncIterator[str]:
     await state.refresh_providers()
     status = state.get_status()
+    scenario_profile = get_demo_scenario(scenario)
     provider_sample = await _run_provider_sample(status)
     safe_cases = min(max(total_cases, 1), 12)
     safe_failures = min(max(failure_count, 0), safe_cases)
-    run = state.create_streaming_run(suite_name=suite_name or f"{scenario} demo run")
+    run = state.create_streaming_run(suite_name=suite_name or f"{scenario_profile['label']} demo run")
     run_id = run["run_id"]
     cases: list[dict[str, Any]] = []
 
-    yield f"event: start\ndata: {json.dumps({'run_id': run_id, 'status': 'running', 'scenario': scenario, 'cases': safe_cases, 'failures': safe_failures})}\n\n"
+    start_payload = {
+        "run_id": run_id,
+        "status": "running",
+        "scenario": scenario_profile["id"],
+        "label": scenario_profile["label"],
+        "objective": scenario_profile["objective"],
+        "technique": scenario_profile["technique"],
+        "owasp": scenario_profile["owasp"],
+        "risk": scenario_profile["risk"],
+        "cases": safe_cases,
+        "failures": safe_failures,
+    }
+    yield f"event: start\ndata: {json.dumps(start_payload)}\n\n"
     yield f"event: provider\ndata: {json.dumps(provider_sample)}\n\n"
 
     failure_indexes = set(range(min(safe_failures, safe_cases)))
     for index in range(safe_cases):
         failed_case = index in failure_indexes
-        case = _build_demo_case(run_id, index, failure=failed_case)
+        case = _build_demo_case(run_id, index, failure=failed_case, scenario=scenario_profile)
         cases.append(case)
         payload = {
             "run_id": run_id,
@@ -630,10 +744,17 @@ async def _stream_demo_run(
             "total": safe_cases,
             "case_id": case["case_id"],
             "status": "processing",
-            "scenario": scenario,
+            "scenario": scenario_profile["id"],
+            "risk": scenario_profile["risk"],
+            "owasp": scenario_profile["owasp"],
+            "technique": scenario_profile["technique"],
             "leak_score": case["scores"]["leak_score"],
             "policy_violation_score": case["scores"]["policy_violation_score"],
-            "finding": "possible leak" if failed_case else "control passed",
+            "finding": (
+                scenario_profile["failure_finding"]
+                if failed_case
+                else scenario_profile["pass_finding"]
+            ),
         }
         yield f"event: progress\ndata: {json.dumps(payload)}\n\n"
         await asyncio.sleep(0.35)
@@ -683,7 +804,7 @@ async def _run_provider_sample(status_data: dict[str, Any]) -> dict[str, Any]:
         "provider_id": provider_id,
         "model": model,
         "message": "Local provider sample completed.",
-        "response": response.content[:240],
+        "response": _format_provider_sample_response(response.content),
     }
 
 

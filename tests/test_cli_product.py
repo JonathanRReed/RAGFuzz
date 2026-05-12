@@ -10,9 +10,10 @@ import tomllib
 from typer.testing import CliRunner
 
 from ragfuzz.cli import _select_chat_model
-from ragfuzz.config import Config
+from ragfuzz.config import Config, SuiteConfig
 from ragfuzz.engine import Scheduler, SchedulerConfig
 from ragfuzz.models import Response, ScoreVector
+from ragfuzz.reports.data import build_report_data
 from ragfuzz.scoring.judge import JudgeScorer
 
 
@@ -44,6 +45,54 @@ def test_auto_model_selection_keeps_configured_model_when_available() -> None:
     )
 
     assert selected == "qwen3.5:9b"
+
+
+def test_research_backed_suites_load_with_metadata() -> None:
+    suite_dir = Path(__file__).resolve().parents[1] / "suites"
+    suite_paths = sorted(suite_dir.glob("*.yaml"))
+
+    assert {path.name for path in suite_paths} >= {
+        "rag-canary-leak.yaml",
+        "rag-indirect-prompt-injection.yaml",
+        "rag-retrieval-conflict.yaml",
+        "rag-poisoned-knowledge.yaml",
+    }
+
+    loaded = [SuiteConfig.load(path) for path in suite_paths]
+    by_name = {suite.name: suite for suite in loaded}
+
+    assert by_name["rag-indirect-prompt-injection"].owasp == ["LLM01", "LLM05", "LLM08"]
+    assert by_name["rag-retrieval-conflict"].run_type == "retrieval"
+    assert by_name["rag-poisoned-knowledge"].risk_tags == [
+        "knowledge-base-poisoning",
+        "poison-influence",
+        "corpus-integrity",
+    ]
+    assert all(suite.research for suite in loaded)
+
+
+def test_report_data_preserves_suite_research_and_owasp_metadata() -> None:
+    report = build_report_data(
+        {
+            "run_id": "run-research",
+            "timestamp": "2026-05-12T15:00:00Z",
+            "suite": {
+                "id": "rag-indirect-prompt-injection",
+                "name": "rag-indirect-prompt-injection",
+                "run_type": "prompt-injection",
+                "owasp": ["LLM01", "LLM05", "LLM08"],
+                "research": [{"name": "AgentDojo", "url": "https://arxiv.org/abs/2406.13352"}],
+                "risk_tags": ["indirect-prompt-injection"],
+            },
+            "config": {},
+            "extra": {},
+        },
+        [],
+    )
+
+    assert report["metadata"]["suite"]["owasp"] == ["LLM01", "LLM05", "LLM08"]
+    assert report["metadata"]["suite"]["research"][0]["name"] == "AgentDojo"
+    assert report["metadata"]["suite"]["risk_tags"] == ["indirect-prompt-injection"]
 
 
 @pytest.mark.asyncio

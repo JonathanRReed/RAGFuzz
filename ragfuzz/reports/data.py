@@ -189,6 +189,12 @@ def build_report_data(run_data: dict[str, Any], cases: list[dict[str, Any]]) -> 
     suite_data = run_data.get("suite") or {}
     config_data = run_data.get("config") or {}
     extra_data = run_data.get("extra") or {}
+    suite_metadata = {
+        "run_type": str(suite_data.get("run_type", "unknown")),
+        "owasp": suite_data.get("owasp") or extra_data.get("owasp") or [],
+        "research": suite_data.get("research") or extra_data.get("research") or [],
+        "risk_tags": suite_data.get("risk_tags") or extra_data.get("risk_tags") or [],
+    }
 
     return {
         "run_id": str(run_data.get("run_id", "unknown")),
@@ -206,6 +212,7 @@ def build_report_data(run_data: dict[str, Any], cases: list[dict[str, Any]]) -> 
             {
                 "config": config_data,
                 "extra": extra_data,
+                "suite": suite_metadata,
             }
         ),
         "failures": failures,
