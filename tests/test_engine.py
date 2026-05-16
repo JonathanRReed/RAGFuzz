@@ -154,6 +154,39 @@ class TestCorpus:
         assert len(prioritized) == 2
         assert prioritized[0].energy > prioritized[1].energy
 
+    def test_prioritize_entries_supports_top_n_without_reordering_stable_ties(self) -> None:
+        """Test top-N prioritization with stable tie behavior."""
+        corpus = Corpus()
+
+        entries = [
+            CorpusEntry(
+                case_id="case-1",
+                input_text="input 1",
+                scores=ScoreVector(leak_score=0.5, policy_violation_score=0.0),
+                failure_signature="sig1",
+            ),
+            CorpusEntry(
+                case_id="case-2",
+                input_text="input 2",
+                scores=ScoreVector(leak_score=0.5, policy_violation_score=0.0),
+                failure_signature="sig2",
+            ),
+            CorpusEntry(
+                case_id="case-3",
+                input_text="input 3",
+                scores=ScoreVector(leak_score=0.2, policy_violation_score=0.0),
+                failure_signature="sig3",
+            ),
+        ]
+        for entry in entries:
+            corpus.add_entry(entry)
+
+        prioritized = corpus.prioritize_entries(num_entries=2)
+
+        assert len(prioritized) == 2
+        assert prioritized[0].case_id == "case-1"
+        assert prioritized[1].case_id == "case-2"
+
     def test_failure_signature(self) -> None:
         """Test failure signature calculation."""
         corpus = Corpus()

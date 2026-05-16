@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from heapq import nlargest
 from typing import Any
 
 import numpy as np
@@ -126,11 +127,20 @@ class Corpus:
             # Energy increases with p_fail and novelty bonus
             entry.energy = p_fail * (1.0 + entry.novelty_bonus)
 
+        if num_entries:
+            # Keep behavior for positive counts and avoid full sort on every batch.
+            # Preserve stable tie behavior by preferring earlier corpus order on equal energy.
+            # We do this by storing a positional index and using it as a secondary key.
+            if num_entries <= 0:
+                return []
+            indexed_entries = list(enumerate(self.entries))
+            top_indexed_entries = nlargest(
+                num_entries, indexed_entries, key=lambda item: (item[1].energy, -item[0])
+            )
+            return [entry for _, entry in top_indexed_entries]
+
         # Sort by energy (descending)
         sorted_entries = sorted(self.entries, key=lambda e: e.energy, reverse=True)
-
-        if num_entries:
-            return sorted_entries[:num_entries]
 
         return sorted_entries
 
