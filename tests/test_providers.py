@@ -6,6 +6,7 @@ import pytest
 
 from ragfuzz.config import Config, ProviderConfig
 from ragfuzz.providers import OpenAICompatProvider
+from ragfuzz.utils import close_client, get_async_client, should_trust_env
 
 
 class TestProviderConfig:
@@ -56,6 +57,30 @@ class TestOpenAICompatProvider:
         healthy = await provider.health_check()
         assert healthy is False
 
+    @pytest.mark.asyncio
+    async def test_shared_http_client_defaults_to_local_first_proxy_behavior(self) -> None:
+        """Test local-first HTTP traffic does not inherit shell proxy settings by default."""
+        client = get_async_client()
+
+        try:
+            assert client.trust_env is False
+        finally:
+            await close_client()
+
+    @pytest.mark.asyncio
+    async def test_shared_http_client_can_opt_into_proxy_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test enterprise environments can opt into proxy-aware HTTP behavior."""
+        monkeypatch.setenv("RAGFUZZ_HTTP_TRUST_ENV", "true")
+        client = get_async_client()
+
+        try:
+            assert should_trust_env() is True
+            assert client.trust_env is True
+        finally:
+            await close_client()
+
 
 class TestConfig:
     """Test Config class."""
@@ -84,6 +109,27 @@ class TestConfig:
         assert config.providers["test"].type == "openai_compat"
         assert config.default_provider == "test"
         assert config.budget.max_runs == 10
+
+    def test_load_config_reads_run_section_paths(self, tmp_path: Path) -> None:
+        """Test generated config shape controls run and cache paths."""
+        config_path = tmp_path / "ragfuzz.toml"
+        config_path.write_text(
+            """[providers.test]
+type = "openai_compat"
+base_url = "http://localhost:9999/v1"
+api_key_env = "TEST_API_KEY"
+default_model = "test-model"
+
+[run]
+run_dir = "custom-runs"
+cache_dir = "custom-cache"
+"""
+        )
+
+        config = Config.load(config_path)
+
+        assert config.run_dir == "custom-runs"
+        assert config.cache_dir == "custom-cache"
 
     def test_get_provider(self, temp_config: Path) -> None:
         """Test getting a provider by ID."""

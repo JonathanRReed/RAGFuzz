@@ -175,6 +175,59 @@ def test_demo_stream_includes_research_backed_scenario_context() -> None:
     assert "poisoned source influenced answer" in response.text
 
 
+def test_demo_stream_post_rejects_invalid_case_counts() -> None:
+    from fastapi.testclient import TestClient
+
+    from ragfuzz.demo import create_app
+
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    response = client.post("/api/runs/demo/stream", json={"cases": "not-int"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "cases must be an integer"
+
+
+def test_demo_stream_get_rejects_out_of_range_counts() -> None:
+    from fastapi.testclient import TestClient
+
+    from ragfuzz.demo import create_app
+
+    client = TestClient(create_app(), raise_server_exceptions=False)
+
+    too_many_cases = client.get("/api/runs/demo/stream?cases=99")
+    too_many_failures = client.get("/api/runs/demo/stream?failures=99")
+    negative_cases = client.get("/api/runs/demo/stream?cases=-1")
+
+    assert too_many_cases.status_code == 400
+    assert too_many_cases.json()["detail"] == "cases must be between 1 and 12"
+    assert too_many_failures.status_code == 400
+    assert too_many_failures.json()["detail"] == "failures must be between 0 and 12"
+    assert negative_cases.status_code == 400
+    assert negative_cases.json()["detail"] == "cases must be between 1 and 12"
+
+
+def test_demo_post_endpoints_reject_malformed_json() -> None:
+    from fastapi.testclient import TestClient
+
+    from ragfuzz.demo import create_app
+
+    client = TestClient(create_app(), raise_server_exceptions=False)
+
+    model_response = client.post(
+        "/api/providers/ollama/model",
+        content="{",
+        headers={"content-type": "application/json"},
+    )
+    stream_response = client.post(
+        "/api/runs/demo/stream",
+        content="{",
+        headers={"content-type": "application/json"},
+    )
+
+    assert model_response.status_code == 400
+    assert stream_response.status_code == 400
+
+
 def test_demo_scenario_catalog_falls_back_to_leakage() -> None:
     from ragfuzz.demo.state import get_demo_scenario, get_demo_scenarios
 

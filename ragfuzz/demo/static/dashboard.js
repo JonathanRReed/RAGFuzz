@@ -105,7 +105,7 @@
     async function refreshStatus() {
         const response = await fetch("/api/status", { headers: { Accept: "application/json" } });
         if (!response.ok) {
-            return;
+            throw new Error(`Status refresh failed with ${response.status}`);
         }
 
         const data = await response.json();
@@ -120,7 +120,7 @@
     async function refreshRuns() {
         const response = await fetch("/api/runs/recent", { headers: { Accept: "application/json" } });
         if (!response.ok) {
-            return;
+            throw new Error(`Runs refresh failed with ${response.status}`);
         }
 
         const data = await response.json();
@@ -463,6 +463,11 @@
         return String(Math.min(Math.max(numberValue, min), max));
     }
 
-    refreshStatus().catch(() => {});
-    refreshRuns().catch(() => {});
+    refreshStatus().catch((error) => {
+        appendEventCard("Status unavailable", error.message, "finding");
+        appendLog(`Status refresh failed: ${error.message}`);
+    });
+    refreshRuns().catch((error) => {
+        appendLog(`Runs refresh failed: ${error.message}`);
+    });
 })();

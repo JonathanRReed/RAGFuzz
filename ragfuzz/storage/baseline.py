@@ -4,8 +4,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
+
+_SAFE_BASELINE_COMPONENT = re.compile(r"[^A-Za-z0-9_.-]+")
+_BASELINE_HASH = re.compile(r"[a-f0-9]{16}")
+
+
+def _safe_baseline_component(value: str) -> str:
+    component = _SAFE_BASELINE_COMPONENT.sub("-", value).strip(".-")
+    suite_hash = hashlib.sha256(value.encode()).hexdigest()[:12]
+    return f"{(component[:64] or 'suite')}-{suite_hash}"
+
+
+def _safe_baseline_hash(value: str) -> str:
+    if not _BASELINE_HASH.fullmatch(value):
+        raise ValueError("baseline_hash must be a 16-character lowercase hex digest")
+    return value
 
 
 class BaselineManager:
@@ -38,7 +54,8 @@ class BaselineManager:
         """
         baseline_hash = self._calculate_baseline_hash(cases)
 
-        baseline_path = self.baseline_dir / f"{suite_id}_{baseline_hash}.json"
+        suite_component = _safe_baseline_component(suite_id)
+        baseline_path = self.baseline_dir / f"{suite_component}_{baseline_hash}.json"
 
         baseline_data = {
             "suite_id": suite_id,
@@ -65,8 +82,10 @@ class BaselineManager:
             Baseline data or None if not found.
         """
         baseline_path: Path | None
+        suite_component = _safe_baseline_component(suite_id)
         if baseline_hash:
-            baseline_path = self.baseline_dir / f"{suite_id}_{baseline_hash}.json"
+            safe_hash = _safe_baseline_hash(baseline_hash)
+            baseline_path = self.baseline_dir / f"{suite_component}_{safe_hash}.json"
         else:
             baseline_path = self._find_latest_baseline(suite_id)
 
@@ -74,7 +93,7 @@ class BaselineManager:
             return None
 
         data: dict[str, Any] = json.loads(baseline_path.read_text())
-        return data
+        return data if data.get("suite_id") == suite_id else None
 
     def _find_latest_baseline(self, suite_id: str) -> Path | None:
         """Find the latest baseline for a suite.
@@ -85,12 +104,20 @@ class BaselineManager:
         Returns:
             Path to latest baseline or None.
         """
+        suite_component = _safe_baseline_component(suite_id)
         baselines = sorted(
-            self.baseline_dir.glob(f"{suite_id}_*.json"),
+            self.baseline_dir.glob(f"{suite_component}_*.json"),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
-        return baselines[0] if baselines else None
+        for path in baselines:
+            try:
+                data = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            if data.get("suite_id") == suite_id:
+                return path
+        return None
 
     def compare_against_baseline(
         self,
@@ -248,12 +275,21 @@ class BaselineManager:
             True if deleted.
         """
         delete_path: Path | None
+        suite_component = _safe_baseline_component(suite_id)
         if baseline_hash:
-            delete_path = self.baseline_dir / f"{suite_id}_{baseline_hash}.json"
+            safe_hash = _safe_baseline_hash(baseline_hash)
+            delete_path = self.baseline_dir / f"{suite_component}_{safe_hash}.json"
         else:
             delete_path = self._find_latest_baseline(suite_id)
 
         if not delete_path or not delete_path.exists():
+            return False
+
+        try:
+            data = json.loads(delete_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return False
+        if data.get("suite_id") != suite_id:
             return False
 
         delete_path.unlink()

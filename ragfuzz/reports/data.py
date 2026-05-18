@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 _SENSITIVE_KEY_NAMES = {
     "api_key",
@@ -16,11 +17,21 @@ _SENSITIVE_KEY_NAMES = {
     "secret",
     "token",
 }
+_SENSITIVE_QUERY_NAMES = _SENSITIVE_KEY_NAMES | {
+    "access_token",
+    "auth",
+    "credential",
+    "expires",
+    "key",
+    "signature",
+    "signed",
+    "sig",
+}
 
 _PATTERNS = (
     re.compile(r"\bBearer\s+[A-Za-z0-9._~-]{8,}\b", re.IGNORECASE),
     re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
-    re.compile(r"\b[A-Za-z0-9_=-]{32,}\b"),
+    re.compile(r"\b[A-Za-z0-9_=]{32,}\b"),
 )
 
 
@@ -80,6 +91,43 @@ def redact_value(value: Any, *, key_path: tuple[str, ...] = ()) -> Any:
         return redact_text(value)
 
     return value
+
+
+def safe_report_url(value: Any) -> str | None:
+    """Return a safe http(s) URL for rendered reports, or None."""
+
+    if not isinstance(value, str):
+        return None
+
+    candidate = redact_text(value.strip())
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    if parsed.username or parsed.password:
+        return None
+
+    safe_query = [
+        (key, val)
+        for key, val in parse_qsl(parsed.query, keep_blank_values=True)
+        if not _is_sensitive_query_key(key)
+    ]
+    return urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            urlencode(safe_query, doseq=True),
+            "",
+        )
+    )
+
+
+def _is_sensitive_query_key(key: str) -> bool:
+    key_name = key.lower()
+    return key_name in _SENSITIVE_QUERY_NAMES or any(
+        sensitive in key_name for sensitive in _SENSITIVE_QUERY_NAMES
+    )
 
 
 def _case_messages_text(case: dict[str, Any]) -> str:
@@ -154,7 +202,7 @@ def _case_summary(case: dict[str, Any]) -> dict[str, Any]:
         "leak_score": leak_score,
         "policy_violation_score": policy_violation_score,
         "trace_id": str(trace_id) if trace_id else None,
-        "rag_lens_url": case.get("rag_lens_url"),
+        "rag_lens_url": safe_report_url(case.get("rag_lens_url")),
         "input_text": redact_text(redacted_input),
         "is_failure": _is_failure(scores),
         "scores": {

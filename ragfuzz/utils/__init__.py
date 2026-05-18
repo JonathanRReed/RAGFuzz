@@ -3,9 +3,9 @@
 import importlib.util
 from typing import Any
 
-from .async_client import close_client, get_async_client
+from .async_client import close_client, get_async_client, should_trust_env
 
-__all__ = ["close_client", "get_async_client"]
+__all__ = ["close_client", "get_async_client", "should_trust_env"]
 
 VRAMMonitor: Any = None
 
