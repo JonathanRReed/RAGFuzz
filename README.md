@@ -27,7 +27,7 @@ Cloud provider setup is not required for the normal local workflow.
 ## Install
 
 ```bash
-git clone https://github.com/your-org/ragfuzz.git
+git clone https://github.com/JonathanRReed/RAGFuzz.git
 cd ragfuzz
 uv sync --all-extras --dev
 ```
@@ -220,12 +220,17 @@ uv run ragfuzz demo [--host 127.0.0.1] [--port 8765] [--no-open]
 uv run ragfuzz providers-ls
 uv run ragfuzz providers-doctor [--provider PROVIDER] [--bench]
 uv run ragfuzz models-ls [--provider PROVIDER]
-uv run ragfuzz check-api URL [--headers JSON]
-uv run ragfuzz run SUITE --provider PROVIDER [--runs N] [--concurrency N] [--dry-run] [--json-summary]
+uv run ragfuzz doctor [--config ragfuzz.toml] [--skip-provider-checks] [--json]
+uv run ragfuzz readiness [--config ragfuzz.toml] [--evidence-dir DIR] [--skip-provider-checks] [--json]
+uv run ragfuzz target-check URL [--allowed-host HOST] [--allow-public-target] [--json]
+uv run ragfuzz redact-check PATH [--json]
+uv run ragfuzz evidence-bundle [--run-dir RUN_DIR] [--output-dir evidence] [--skip-provider-checks] [--json]
+uv run ragfuzz check-api URL [--headers JSON] [--allow-public-target]
+uv run ragfuzz run SUITE --provider PROVIDER [--runs N] [--concurrency N] [--dry-run] [--json-summary] [--allow-public-target]
 uv run ragfuzz report RUN_DIR [--html] [--md] [--json]
 uv run ragfuzz replay CASE_JSON --provider PROVIDER
-uv run ragfuzz baseline-save RUN_DIR NAME
-uv run ragfuzz baseline-check RUN_DIR NAME
+uv run ragfuzz baseline-save SUITE CASES_JSONL
+uv run ragfuzz baseline-check SUITE CASES_JSONL
 uv run ragfuzz cache-cleanup [--max-age SECONDS]
 uv run ragfuzz corpus-stats RUN_DIR
 uv run ragfuzz bisect RUN_A RUN_B
@@ -243,6 +248,54 @@ Run reports include:
 - Mutation and trace metadata.
 - Redacted user-controlled headers and API-key-like values.
 - HTML, Markdown, and JSON outputs for local review or CI comments.
+
+For local-first safety, JR AutoRAG target checks and poison-mode runs default to loopback or private target hosts. Use `--allow-public-target` only when you intentionally want to contact a public or link-local target. Proxy environment variables are ignored by default for local HTTP traffic. Set `RAGFUZZ_HTTP_TRUST_ENV=true` when a corporate network requires proxy-aware provider checks.
+
+## Local Enterprise Operator Mode
+
+RAGFuzz is designed as a local enterprise utility for IT and security operators. It does not require hosted auth, SaaS tenancy, or cloud storage.
+
+Before testing a target, record authorization and validate the URL policy.
+
+```bash
+uv run ragfuzz target-check http://127.0.0.1:8000
+uv run ragfuzz target-check https://rag.internal.example --allowed-host '*.internal.example'
+```
+
+Public and link-local hosts are blocked unless the operator passes `--allow-public-target`.
+
+Run the local health gate.
+
+```bash
+uv run ragfuzz doctor
+```
+
+Build a handoff bundle after a run.
+
+```bash
+uv run ragfuzz evidence-bundle --run-dir runs/YOUR_RUN_ID --output-dir evidence
+uv run ragfuzz redact-check evidence
+```
+
+The bundle contains readiness evidence, report summaries, HTML and Markdown reports, a redaction proof, and `manifest.json`.
+
+Operator actions append JSONL events to the local audit log under the configured cache directory. The log records timestamp, local username when available, command action, target URL or run id when applicable, report outputs, and poison cleanup status. Sensitive values are redacted before writing.
+
+## Interview And Client Handoff
+
+Generate a readiness evidence bundle before showing the project.
+
+```bash
+uv run ragfuzz doctor
+uv run ragfuzz readiness --evidence-dir evidence
+uv run ragfuzz evidence-bundle --run-dir runs/YOUR_RUN_ID --output-dir evidence
+```
+
+Useful handoff documents:
+
+- [SECURITY.md](SECURITY.md)
+- [docs/enterprise/interview-demo-script.md](docs/enterprise/interview-demo-script.md)
+- [docs/enterprise/client-install-handoff.md](docs/enterprise/client-install-handoff.md)
 
 ## CI Smoke Test
 
@@ -274,7 +327,7 @@ For the current research and peer-tool upgrade map, see
 [docs/research/ragfuzz-research-and-peer-audit-2026-05-12.md](docs/research/ragfuzz-research-and-peer-audit-2026-05-12.md).
 
 For production-readiness checks and remaining risks, see
-[docs/audits/production-readiness-2026-05-12.md](docs/audits/production-readiness-2026-05-12.md).
+[docs/audits/production-readiness-2026-05-18.md](docs/audits/production-readiness-2026-05-18.md).
 
 ## Troubleshooting
 

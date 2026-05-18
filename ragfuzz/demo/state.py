@@ -13,6 +13,7 @@ from uuid import uuid4
 import httpx
 
 from ragfuzz.reports import build_report_data, redact_value
+from ragfuzz.utils import should_trust_env
 
 
 @dataclass(frozen=True)
@@ -156,7 +157,7 @@ class DemoState:
 
     async def refresh_providers(self) -> list[dict[str, Any]]:
         checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        async with httpx.AsyncClient(timeout=1.4) as client:
+        async with httpx.AsyncClient(timeout=1.4, trust_env=should_trust_env()) as client:
             refreshed = [
                 await self._probe_provider(client, provider, checked_at)
                 for provider in self._build_providers()

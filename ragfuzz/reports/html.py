@@ -91,7 +91,7 @@ def _render_failure_cards(failures: list[dict[str, Any]]) -> str:
         rag_lens_url = case.get("rag_lens_url")
         if rag_lens_url:
             links.append(
-                f'<a class="link-button" href="{escape(str(rag_lens_url))}" target="_blank" rel="noreferrer">RAG Lens</a>'
+                f'<a class="link-button" href="{escape(str(rag_lens_url))}" target="_blank" rel="noreferrer noopener">RAG Lens</a>'
             )
 
         links_html = "".join(links)

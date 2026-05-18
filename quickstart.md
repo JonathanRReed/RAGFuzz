@@ -11,7 +11,7 @@ Get a real local RAGFuzz run working first, then use the demo dashboard for walk
 ## Installation
 
 ```bash
-git clone https://github.com/your-org/ragfuzz.git
+git clone https://github.com/JonathanRReed/RAGFuzz.git
 cd ragfuzz
 uv sync --all-extras --dev
 ```
@@ -42,6 +42,8 @@ default_target = "chat"
 ## Verify The Real Product Path
 
 ```bash
+uv run ragfuzz doctor
+uv run ragfuzz readiness --evidence-dir evidence
 uv run ragfuzz providers-doctor --provider ollama
 uv run ragfuzz models-ls --provider ollama
 uv run ragfuzz run suites/rag-canary-leak.yaml --provider ollama --runs 1 --concurrency 1 --json-summary
@@ -53,6 +55,8 @@ Generate reports for the run directory printed by the command.
 
 ```bash
 uv run ragfuzz report runs/<run_id> --html --md --json
+uv run ragfuzz evidence-bundle --run-dir runs/<run_id> --output-dir evidence
+uv run ragfuzz redact-check evidence
 ```
 
 ## Demo Dashboard
@@ -108,6 +112,11 @@ Local Ollama, LM Studio, and vLLM do not require API keys unless you start those
 | `ragfuzz providers-ls` | List configured providers |
 | `ragfuzz providers-doctor` | Check provider health |
 | `ragfuzz models-ls` | List available provider models |
+| `ragfuzz doctor` | Run local operator health checks |
+| `ragfuzz readiness` | Generate local readiness and handoff evidence |
+| `ragfuzz target-check <url>` | Validate target URL authorization policy |
+| `ragfuzz redact-check <path>` | Scan reports or bundles for obvious secrets |
+| `ragfuzz evidence-bundle` | Build a local handoff bundle with manifest and redaction proof |
 | `ragfuzz run <suite>` | Run a real test suite |
 | `ragfuzz report <run>` | Generate reports |
 | `ragfuzz replay <case>` | Replay a failure case |
@@ -139,5 +148,11 @@ Out of memory:
 - Reduce concurrency.
 - Use a quantized model.
 - Lower the VRAM threshold in `ragfuzz.toml`.
+
+Corporate proxy required:
+
+```bash
+RAGFUZZ_HTTP_TRUST_ENV=true uv run ragfuzz providers-doctor
+```
 
 For the complete product guide, see [README.md](README.md).

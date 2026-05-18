@@ -3,12 +3,7 @@
 from __future__ import annotations
 
 import json
-import sys
-import types
-from importlib import util as importlib_util
 from pathlib import Path
-
-import pytest
 
 
 def _write_run_fixture(run_dir: Path) -> None:
@@ -55,44 +50,12 @@ def _write_run_fixture(run_dir: Path) -> None:
 
 
 def test_html_report_escapes_user_content_and_writes_default_path(tmp_path: Path) -> None:
-    html_module_path = Path(__file__).resolve().parents[1] / "ragfuzz" / "reports" / "html.py"
-    if not html_module_path.exists():
-        pytest.skip(
-            "HTML report module is not present yet, this test documents the expected contract."
-        )
-
-    data_module_path = Path(__file__).resolve().parents[1] / "ragfuzz" / "reports" / "data.py"
-    if not data_module_path.exists():
-        pytest.skip("Report data helpers are not present yet.")
-
-    package_name = "ragfuzz.reports"
-    package = types.ModuleType(package_name)
-    package.__path__ = [str(html_module_path.parent)]  # type: ignore[attr-defined]
-    sys.modules.setdefault(package_name, package)
-
-    data_spec = importlib_util.spec_from_file_location(
-        "ragfuzz.reports.data", data_module_path
-    )
-    if data_spec is None or data_spec.loader is None:
-        pytest.skip("Report data module cannot be loaded in this checkout.")
-
-    data_module = importlib_util.module_from_spec(data_spec)
-    sys.modules[data_spec.name] = data_module
-    data_spec.loader.exec_module(data_module)
-
-    html_spec = importlib_util.spec_from_file_location("ragfuzz_reports_html", html_module_path)
-    if html_spec is None or html_spec.loader is None:
-        pytest.skip("HTML report module cannot be loaded in this checkout.")
-
-    html_module = importlib_util.module_from_spec(html_spec)
-    html_module.__package__ = package_name
-    html_spec.loader.exec_module(html_module)
-    html_reporter_cls = html_module.HTMLReporter
+    from ragfuzz.reports.html import HTMLReporter
 
     run_dir = tmp_path / "run"
     _write_run_fixture(run_dir)
 
-    report_path = html_reporter_cls().generate(run_dir)
+    report_path = HTMLReporter().generate(run_dir)
 
     assert report_path == run_dir / "report.html"
     assert report_path.exists()
@@ -107,54 +70,64 @@ def test_html_report_escapes_user_content_and_writes_default_path(tmp_path: Path
 
 
 def test_markdown_report_contract_redacts_sensitive_values(tmp_path: Path) -> None:
-    html_module_path = Path(__file__).resolve().parents[1] / "ragfuzz" / "reports" / "html.py"
-    if not html_module_path.exists():
-        pytest.skip(
-            "Report package is incomplete in this checkout, this test documents the expected contract."
-        )
-
-    markdown_module_path = Path(__file__).resolve().parents[1] / "ragfuzz" / "reports" / "markdown.py"
-    if not markdown_module_path.exists():
-        pytest.skip(
-            "Markdown report API is not present yet, this test documents the expected contract."
-        )
-
-    markdown_spec = importlib_util.spec_from_file_location(
-        "ragfuzz_reports_markdown", markdown_module_path
-    )
-    if markdown_spec is None or markdown_spec.loader is None:
-        pytest.skip("Markdown report module cannot be loaded in this checkout.")
-
-    markdown_module = importlib_util.module_from_spec(markdown_spec)
-    markdown_module.__package__ = "ragfuzz.reports"
-    try:
-        markdown_spec.loader.exec_module(markdown_module)
-    except SyntaxError:
-        pytest.skip("Markdown report module still has a syntax error in this checkout.")
-
-    reporter = (
-        getattr(markdown_module, "MarkdownReporter", None)
-        or getattr(markdown_module, "MarkdownReport", None)
-        or getattr(markdown_module, "render_markdown_report", None)
-    )
-
-    if reporter is None:
-        pytest.skip("Markdown report API is not exposed yet.")
+    from ragfuzz.reports.markdown import MarkdownReporter
 
     run_dir = tmp_path / "run"
     _write_run_fixture(run_dir)
 
-    if callable(reporter) and not hasattr(reporter, "generate"):
-        output = reporter(run_dir)
-        output_path = Path(output) if output is not None else None
-    else:
-        reporter_instance = reporter()
-        output = reporter_instance.generate(run_dir)
-        output_path = Path(output) if output is not None else None
-
-    if output_path is None:
-        pytest.skip("Markdown report API did not return an output path.")
-
+    output_path = MarkdownReporter().generate(run_dir)
     markdown = output_path.read_text()
     assert "<script>" not in markdown
     assert "alert('xss')" not in markdown
+
+
+def test_report_data_drops_unsafe_report_link_schemes(tmp_path: Path) -> None:
+    from ragfuzz.reports.html import HTMLReporter
+    from ragfuzz.reports.markdown import MarkdownReporter
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-unsafe-link",
+                "timestamp": "2026-05-18T12:00:00Z",
+                "suite": {"name": "demo-suite"},
+            }
+        )
+    )
+    (run_dir / "cases.jsonl").write_text(
+        json.dumps(
+            {
+                "case_id": "case-unsafe-link",
+                "inputs": {"messages": [{"role": "user", "content": "show evidence"}]},
+                "scores": {"leak_score": 0.75, "policy_violation_score": 0.0},
+                "rag_lens_url": "javascript:alert(1)",
+            }
+        )
+        + "\n"
+    )
+
+    html = HTMLReporter().generate(run_dir).read_text()
+    markdown = MarkdownReporter().generate(run_dir).read_text()
+
+    assert "javascript:alert(1)" not in html
+    assert "javascript:alert(1)" not in markdown
+
+
+def test_report_data_strips_sensitive_report_link_query_values() -> None:
+    from ragfuzz.reports.data import safe_report_url
+
+    safe_url = safe_report_url(
+        "https://example.invalid/trace/123?token=abc123&view=summary&signature=secret#frag"
+    )
+
+    assert safe_url == "https://example.invalid/trace/123?view=summary"
+
+
+def test_report_data_drops_credentialed_report_links() -> None:
+    from ragfuzz.reports.data import safe_report_url
+
+    assert safe_report_url("https://alice:pw@example.invalid/trace/123") is None
+    assert safe_report_url("data:text/html,hello") is None
+    assert safe_report_url("not a url") is None

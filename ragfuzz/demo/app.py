@@ -139,6 +139,18 @@ def _format_provider_sample_response(content: str) -> str:
     return cleaned[:240] if cleaned else "Provider accepted the sample prompt."
 
 
+def _coerce_demo_int(value: Any, *, field: str, default: int, minimum: int, maximum: int) -> int:
+    if value in (None, ""):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be an integer") from exc
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"{field} must be between {minimum} and {maximum}")
+    return parsed
+
+
 def _render_markdown_preview(markdown: str, run_id: str) -> str:
     """Render Markdown as a readable local preview while preserving raw access."""
     body_html = _markdown_to_preview_html(markdown)
@@ -849,7 +861,12 @@ def create_demo_app(state: DemoState | None = None) -> FastAPI:
 
     @app.post("/api/providers/{provider_id}/model")
     async def select_provider_model(provider_id: str, request: Request) -> JSONResponse:
-        payload = await request.json()
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise ValueError("request body must be a JSON object")
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
         model_id = payload.get("model_id")
         if not isinstance(model_id, str) or not model_id:
             return JSONResponse({"detail": "model_id is required"}, status_code=400)
@@ -900,27 +917,62 @@ def create_demo_app(state: DemoState | None = None) -> FastAPI:
     @app.get("/api/runs/demo/stream")
     async def demo_stream(
         scenario: str = "leakage",
-        cases: int = 5,
-        failures: int = 2,
-    ) -> StreamingResponse:
+        cases: str = "5",
+        failures: str = "2",
+    ) -> Response:
+        try:
+            case_count = _coerce_demo_int(
+                cases,
+                field="cases",
+                default=5,
+                minimum=1,
+                maximum=12,
+            )
+            failure_count = _coerce_demo_int(
+                failures,
+                field="failures",
+                default=2,
+                minimum=0,
+                maximum=12,
+            )
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
         stream = _stream_demo_run(
             demo_state,
             suite_name=f"{scenario} demo run",
             scenario=scenario,
-            total_cases=cases,
-            failure_count=failures,
+            total_cases=case_count,
+            failure_count=failure_count,
         )
         return StreamingResponse(stream, media_type="text/event-stream")
 
     @app.post(
         "/api/runs/demo/stream",
         response_class=StreamingResponse,
+        response_model=None,
     )
-    async def demo_stream_post(request: Request) -> StreamingResponse:
-        payload = await request.json()
-        scenario = str(payload.get("scenario") or "leakage")
-        cases = int(payload.get("cases") or 5)
-        failures = int(payload.get("failures") or 2)
+    async def demo_stream_post(request: Request) -> Response:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise ValueError("request body must be a JSON object")
+            scenario = str(payload.get("scenario") or "leakage")
+            cases = _coerce_demo_int(
+                payload.get("cases"),
+                field="cases",
+                default=5,
+                minimum=1,
+                maximum=12,
+            )
+            failures = _coerce_demo_int(
+                payload.get("failures"),
+                field="failures",
+                default=2,
+                minimum=0,
+                maximum=12,
+            )
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=400)
         stream = _stream_demo_run(
             demo_state,
             suite_name=f"{scenario} demo run",

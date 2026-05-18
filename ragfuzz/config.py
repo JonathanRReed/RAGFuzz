@@ -122,9 +122,13 @@ class Config:
             max_duration_seconds=budget_data.get("max_duration_seconds"),
         )
 
-        # Parse other settings
-        config.run_dir = data.get("run_dir", "runs")
-        config.cache_dir = data.get("cache_dir", ".cache")
+        # Parse other settings. Current default configs keep these under [run],
+        # while older configs may still have root-level values.
+        run_data = data.get("run", {})
+        if not isinstance(run_data, dict):
+            run_data = {}
+        config.run_dir = data.get("run_dir", run_data.get("run_dir", "runs"))
+        config.cache_dir = data.get("cache_dir", run_data.get("cache_dir", ".cache"))
         config.vram_threshold_mb = data.get("vram", {}).get("threshold_mb", 1024)
 
         # Parse default_provider and default_target from budget section or root

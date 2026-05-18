@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import getpass
+import ipaddress
 import json
+import re
+import shutil
+import socket
+import sys
 import webbrowser
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import typer
 from rich.console import Console
 
+from ragfuzz import __version__
 from ragfuzz.config import Config, SuiteConfig
 from ragfuzz.engine import Cache, Scheduler, SchedulerConfig
 from ragfuzz.mutators import (
@@ -23,6 +32,7 @@ from ragfuzz.mutators import (
 )
 from ragfuzz.providers import OpenAICompatProvider, ProviderDoctor
 from ragfuzz.reports import HTMLReporter
+from ragfuzz.reports.data import redact_value, safe_report_url
 from ragfuzz.reports.viz import MutationGraphViz
 from ragfuzz.scoring import HeuristicScorer
 from ragfuzz.scoring.base import Scorer
@@ -196,13 +206,241 @@ def providers_doctor(
 
 
 @app.command()
+def readiness(
+    config_path: str = typer.Option("ragfuzz.toml", "--config", help="Config file to inspect"),
+    evidence_dir: str = typer.Option(
+        None,
+        "--evidence-dir",
+        help="Optional directory for readiness.json evidence output",
+    ),
+    skip_provider_checks: bool = typer.Option(
+        False,
+        "--skip-provider-checks",
+        help="Skip live provider probing for offline CI or documentation checks",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Print readiness evidence as JSON"),
+) -> None:
+    """Generate an interview and enterprise readiness report."""
+
+    async def _readiness() -> None:
+        try:
+            report = await _build_readiness_report(
+                config_path=Path(config_path),
+                skip_provider_checks=skip_provider_checks,
+            )
+            if evidence_dir:
+                evidence_path = Path(evidence_dir)
+                evidence_path.mkdir(parents=True, exist_ok=True)
+                output_path = evidence_path / "readiness.json"
+                report["evidence_path"] = str(output_path)
+                output_path.write_text(json.dumps(report, indent=2, sort_keys=True))
+
+            if json_out:
+                typer.echo(json.dumps(report, sort_keys=True))
+            else:
+                _print_readiness_report(report)
+        except Exception as e:
+            console.print(f"ERROR [red]{e}[/red]")
+            raise typer.Exit(1) from e
+        finally:
+            await close_client()
+
+    asyncio.run(_readiness())
+
+
+@app.command()
+def doctor(
+    config_path: str = typer.Option("ragfuzz.toml", "--config", help="Config file to inspect"),
+    skip_provider_checks: bool = typer.Option(
+        False,
+        "--skip-provider-checks",
+        help="Skip live provider probing for offline CI or documentation checks",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Print doctor evidence as JSON"),
+) -> None:
+    """Run the local operator health check."""
+
+    async def _doctor() -> None:
+        config = _load_config_for_audit(Path(config_path))
+        status = "error"
+        try:
+            report = await _build_readiness_report(
+                config_path=Path(config_path),
+                skip_provider_checks=skip_provider_checks,
+            )
+            status = report["status"]
+            _write_audit_event(
+                "doctor",
+                status,
+                {"config_path": config_path, "skip_provider_checks": skip_provider_checks},
+                config,
+            )
+            if json_out:
+                typer.echo(json.dumps(report, sort_keys=True))
+            else:
+                _print_readiness_report(report)
+        except Exception as e:
+            _write_audit_event("doctor", status, {"config_path": config_path, "error": str(e)}, config)
+            console.print(f"ERROR [red]{e}[/red]")
+            raise typer.Exit(1) from e
+        finally:
+            await close_client()
+
+    asyncio.run(_doctor())
+
+
+@app.command()
+def target_check(
+    url: str = typer.Argument(..., help="Target URL to validate before testing"),
+    allow_public_target: bool = typer.Option(
+        False,
+        "--allow-public-target",
+        help="Allow public or link-local target hosts after explicit operator approval.",
+    ),
+    allowed_host: list[str] | None = typer.Option(
+        None,
+        "--allowed-host",
+        help="Approved host or wildcard host such as *.corp.example.",
+    ),
+    config_path: str = typer.Option("ragfuzz.toml", "--config", help="Config file for audit log path"),
+    json_out: bool = typer.Option(False, "--json", help="Print target policy evidence as JSON"),
+) -> None:
+    """Validate a RAG target URL against local enterprise safety policy."""
+
+    config = _load_config_for_audit(Path(config_path))
+    policy = _target_policy(
+        url,
+        allow_public=allow_public_target,
+        allowed_hosts=allowed_host or [],
+    )
+    _write_audit_event(
+        "target-check",
+        "pass" if policy["allowed"] else "fail",
+        {
+            "url": url,
+            "allowed": policy["allowed"],
+            "classification": policy["classification"],
+            "reason": policy["reason"],
+        },
+        config,
+    )
+
+    if json_out:
+        typer.echo(json.dumps(policy, sort_keys=True))
+    else:
+        console.print(f"Target policy: [bold]{'allowed' if policy['allowed'] else 'blocked'}[/bold]")
+        console.print(f"  URL: {policy['url']}")
+        console.print(f"  Host: {policy['host'] or 'unknown'}")
+        console.print(f"  Classification: {policy['classification']}")
+        console.print(f"  Reason: {policy['reason']}")
+
+    if not policy["allowed"]:
+        raise typer.Exit(1)
+
+
+@app.command()
+def redact_check(
+    path: str = typer.Argument(..., help="File or directory to scan for unredacted secrets"),
+    json_out: bool = typer.Option(False, "--json", help="Print redaction findings as JSON"),
+) -> None:
+    """Scan local artifacts for obvious secrets before handoff."""
+
+    scan_path = Path(path)
+    findings = _collect_redaction_findings(scan_path)
+    payload = {
+        "status": "pass" if not findings else "fail",
+        "path": str(scan_path),
+        "findings": findings,
+        "finding_count": len(findings),
+    }
+
+    if json_out:
+        typer.echo(json.dumps(payload, sort_keys=True))
+    else:
+        console.print(f"Redaction check: [bold]{payload['status']}[/bold]")
+        console.print(f"Findings: {len(findings)}")
+        for finding in findings[:10]:
+            console.print(
+                f"  {finding['file']}:{finding['line']} {finding['kind']} {finding['detail']}"
+            )
+
+    if findings:
+        raise typer.Exit(1)
+
+
+@app.command()
+def evidence_bundle(
+    run_dir_path: str | None = typer.Option(
+        None,
+        "--run-dir",
+        help="Optional run directory to include report artifacts from",
+    ),
+    output_dir: str = typer.Option("evidence", "--output-dir", help="Evidence bundle directory"),
+    config_path: str = typer.Option("ragfuzz.toml", "--config", help="Config file to inspect"),
+    skip_provider_checks: bool = typer.Option(
+        False,
+        "--skip-provider-checks",
+        help="Skip live provider probing for offline CI or documentation checks",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Print bundle manifest as JSON"),
+) -> None:
+    """Build a local enterprise evidence bundle without secrets."""
+
+    async def _bundle() -> None:
+        config = _load_config_for_audit(Path(config_path))
+        try:
+            manifest = await _build_evidence_bundle(
+                run_dir_path=Path(run_dir_path) if run_dir_path else None,
+                output_dir=Path(output_dir),
+                config_path=Path(config_path),
+                skip_provider_checks=skip_provider_checks,
+            )
+            _write_audit_event(
+                "evidence-bundle",
+                manifest["status"],
+                {
+                    "run_dir": run_dir_path,
+                    "output_dir": output_dir,
+                    "artifact_count": len(manifest["artifacts"]),
+                },
+                config,
+            )
+            if json_out:
+                typer.echo(json.dumps(manifest, sort_keys=True))
+            else:
+                console.print(f"Evidence bundle: [bold]{manifest['status']}[/bold]")
+                console.print(f"Output: [bold]{manifest['output_dir']}[/bold]")
+                for artifact in manifest["artifacts"]:
+                    console.print(f"  {artifact['name']}: {artifact['path']}")
+        except Exception as e:
+            _write_audit_event(
+                "evidence-bundle",
+                "error",
+                {"run_dir": run_dir_path, "output_dir": output_dir, "error": str(e)},
+                config,
+            )
+            console.print(f"ERROR [red]{e}[/red]")
+            raise typer.Exit(1) from e
+        finally:
+            await close_client()
+
+    asyncio.run(_bundle())
+
+
+@app.command()
 def check_api(
     url: str = typer.Argument(..., help="JR AutoRAG base URL"),
     headers: str = typer.Option(None, "--headers", help="Optional headers as JSON"),
+    allow_public_target: bool = typer.Option(
+        False,
+        "--allow-public-target",
+        help="Allow public or link-local target hosts. Default allows loopback/private only.",
+    ),
 ) -> None:
     """Check JR AutoRAG grey-box API connectivity and capabilities."""
 
     async def _check_api() -> None:
+        audit_config = _load_config_for_audit(Path("ragfuzz.toml"))
         try:
             import json
 
@@ -211,6 +449,10 @@ def check_api(
                 raise ValueError("--headers must be a JSON object")
             if not _is_http_url(url):
                 raise ValueError("URL must start with http:// or https://")
+            if not _is_allowed_target_url(url, allow_public=allow_public_target):
+                raise ValueError(
+                    "URL must point to a loopback or private host unless --allow-public-target is set"
+                )
             target = JRAutoRAGTarget(
                 target_id="jr_autorag_check", base_url=url, headers=headers_dict
             )
@@ -255,6 +497,19 @@ def check_api(
 
             for name, status, message in checks:
                 console.print(f"{status} {name}: {message}")
+
+            _write_audit_event(
+                "check-api",
+                "completed",
+                {
+                    "target_url": url,
+                    "checks": [
+                        {"name": name, "status": status, "message": message}
+                        for name, status, message in checks
+                    ],
+                },
+                audit_config,
+            )
 
         except Exception as e:
             console.print(f"ERROR [red]{e}[/red]")
@@ -362,6 +617,11 @@ def run(
     ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Disable caching"),
     poison: str = typer.Option(None, "--poison", help="Poison mode: influence, exfil, bias"),
+    allow_public_target: bool = typer.Option(
+        False,
+        "--allow-public-target",
+        help="Allow poison-mode targets on public or link-local hosts.",
+    ),
     scoring: str = typer.Option(None, "--scoring", help="Scoring mode: heuristic or judge"),
     json_summary: bool = typer.Option(False, "--json-summary", help="Print CI-friendly JSON summary"),
 ) -> None:
@@ -435,15 +695,32 @@ def run(
                 console.print(f"Estimated prompt tokens: {total_prompt_tokens:,}")
                 console.print(f"Estimated completion tokens: {total_completion_tokens:,}")
                 console.print(f"Estimated total cost: ${estimated_cost:.4f}")
+                _write_audit_event(
+                    "run",
+                    "dry_run",
+                    {
+                        "suite": suite,
+                        "suite_name": suite_config.name,
+                        "provider_id": provider_id,
+                        "model_id": resolved_model,
+                        "runs": num_runs,
+                        "concurrency": concurrency_value,
+                        "estimated_cost_usd": round(estimated_cost, 6),
+                    },
+                    config,
+                )
                 return
 
+            target_url: str | None = None
+            cleanup_status = "not_applicable"
+            generated_report_path: str | None = None
             target_instance: ChatTarget | JRAutoRAGTarget = ChatTarget(
                 target_id="chat",
                 provider=provider_instance,
                 default_model=resolved_model,
             )
 
-            run_dir = RunDir()
+            run_dir = RunDir(base_path=config.run_dir)
             run_dir.write_run_config(
                 config,
                 suite_config,
@@ -464,6 +741,12 @@ def run(
                 target_url = suite_config.requires.get("base_url", "http://localhost:8000")
                 if not _is_http_url(target_url):
                     console.print("ERROR JR AutoRAG base_url must start with http:// or https://")
+                    raise typer.Exit(1)
+                if not _is_allowed_target_url(target_url, allow_public=allow_public_target):
+                    console.print(
+                        "ERROR JR AutoRAG base_url must point to loopback/private hosts unless "
+                        "--allow-public-target is set"
+                    )
                     raise typer.Exit(1)
                 target_instance = JRAutoRAGTarget(
                     target_id="jr_autorag",
@@ -570,6 +853,7 @@ def run(
 
             reporter = HTMLReporter()
             report_path = reporter.generate(run_dir.path)
+            generated_report_path = str(report_path)
             console.print(f"\nReport: [bold]{report_path}[/bold]")
 
             if json_summary:
@@ -587,17 +871,40 @@ def run(
                     "unique_failures": stats["corpus"]["unique_failures"],
                     "total_cost_usd": round(stats.get("total_cost_usd", 0), 6),
                 }
-                console.print(json.dumps(summary, sort_keys=True))
+                typer.echo(json.dumps(summary, sort_keys=True))
 
             # Cleanup poisoned chunks if poison mode was used
             if poison and isinstance(target_instance, JRAutoRAGTarget):
                 try:
                     await target_instance.delete_by_tag("run_id", run_dir.run_id)
+                    cleanup_status = "cleaned"
                     console.print(
                         f"OK Cleaned up poisoned chunks tagged with run_id: {run_dir.run_id}"
                     )
                 except Exception as e:
+                    cleanup_status = "cleanup_failed"
                     console.print(f"WARN Could not clean up poisoned chunks: {e}")
+
+            _write_audit_event(
+                "run",
+                "completed",
+                {
+                    "suite": suite,
+                    "suite_name": suite_config.name,
+                    "run_id": run_dir.run_id,
+                    "run_dir": str(run_dir.path),
+                    "target_url": target_url,
+                    "target_id": target_instance.target_id,
+                    "provider_id": provider_id,
+                    "model_id": resolved_model,
+                    "report_outputs": [generated_report_path] if generated_report_path else [],
+                    "cleanup_status": cleanup_status,
+                    "runs_completed": stats["run_count"],
+                    "unique_failures": stats["corpus"]["unique_failures"],
+                    "total_cost_usd": round(stats.get("total_cost_usd", 0), 6),
+                },
+                config,
+            )
 
         except FileNotFoundError as e:
             console.print(f"ERROR File not found: [red]{e}[/red]")
@@ -622,6 +929,8 @@ def report(
 
     try:
         run_dir = Path(run_dir_path)
+        audit_config = _load_config_for_audit(Path("ragfuzz.toml"))
+        generated_outputs: list[str] = []
 
         if not run_dir.exists():
             console.print(f"ERROR Run directory not found: [red]{run_dir_path}[/red]")
@@ -631,14 +940,27 @@ def report(
 
         if html:
             report_path = reporter.generate(run_dir)
+            generated_outputs.append(str(report_path))
             console.print(f"OK HTML report generated: [bold]{report_path}[/bold]")
 
         if md:
             md_path = reporter.generate_markdown(run_dir)
+            generated_outputs.append(str(md_path))
             console.print(f"OK Markdown report generated: [bold]{md_path}[/bold]")
 
         if json_out:
-            console.print(json.dumps(reporter.summarize(run_dir), sort_keys=True))
+            typer.echo(json.dumps(reporter.summarize(run_dir), sort_keys=True))
+
+        _write_audit_event(
+            "report",
+            "completed",
+            {
+                "run_dir": str(run_dir),
+                "report_outputs": generated_outputs,
+                "json_summary": json_out,
+            },
+            audit_config,
+        )
 
     except Exception as e:
         console.print(f"ERROR [red]{e}[/red]")
@@ -847,10 +1169,546 @@ def viz(
         raise typer.Exit(1) from e
 
 
+def _load_config_for_audit(config_path: Path) -> Config | None:
+    try:
+        return Config.load(config_path)
+    except Exception:
+        return None
+
+
+def _audit_log_path(config: Config | None) -> Path:
+    base_dir = Path(config.cache_dir) if config else Path(".cache") / "ragfuzz"
+    return base_dir / "audit.log"
+
+
+def _write_audit_event(
+    action: str,
+    status: str,
+    detail: dict[str, Any],
+    config: Config | None,
+) -> None:
+    """Append a local JSONL operator audit event without blocking the command."""
+    try:
+        audit_path = _audit_log_path(config)
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        event = {
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "user": getpass.getuser(),
+            "action": action,
+            "status": status,
+            "cwd": str(Path.cwd()),
+            "ragfuzz_version": __version__,
+            "detail": redact_value(detail),
+        }
+        with audit_path.open("a", encoding="utf-8") as audit_file:
+            audit_file.write(json.dumps(event, sort_keys=True) + "\n")
+    except Exception:
+        return
+
+
+async def _build_evidence_bundle(
+    *,
+    run_dir_path: Path | None,
+    output_dir: Path,
+    config_path: Path,
+    skip_provider_checks: bool,
+) -> dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    artifacts: list[dict[str, str]] = []
+
+    readiness_report = await _build_readiness_report(
+        config_path=config_path,
+        skip_provider_checks=skip_provider_checks,
+    )
+    readiness_path = output_dir / "readiness.json"
+    readiness_path.write_text(json.dumps(readiness_report, indent=2, sort_keys=True))
+    artifacts.append({"name": "readiness", "path": str(readiness_path)})
+
+    if run_dir_path:
+        if not run_dir_path.exists():
+            raise FileNotFoundError(f"Run directory not found: {run_dir_path}")
+
+        reporter = HTMLReporter()
+        report_html = reporter.generate(run_dir_path)
+        report_md = reporter.generate_markdown(run_dir_path)
+        report_summary = reporter.summarize(run_dir_path)
+
+        summary_path = output_dir / "report-summary.json"
+        summary_path.write_text(json.dumps(report_summary, indent=2, sort_keys=True))
+        artifacts.append({"name": "report-summary", "path": str(summary_path)})
+
+        copied_html = output_dir / "report.html"
+        copied_md = output_dir / "report.md"
+        shutil.copy2(report_html, copied_html)
+        shutil.copy2(report_md, copied_md)
+        artifacts.extend(
+            [
+                {"name": "report-html", "path": str(copied_html)},
+                {"name": "report-markdown", "path": str(copied_md)},
+            ]
+        )
+
+    redaction_findings = _collect_redaction_findings(output_dir)
+    redaction_path = output_dir / "redact-check.json"
+    redaction_payload = {
+        "status": "pass" if not redaction_findings else "fail",
+        "finding_count": len(redaction_findings),
+        "findings": redaction_findings,
+    }
+    redaction_path.write_text(json.dumps(redaction_payload, indent=2, sort_keys=True))
+    artifacts.append({"name": "redact-check", "path": str(redaction_path)})
+
+    manifest = {
+        "status": "ready" if not redaction_findings else "needs_review",
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "output_dir": str(output_dir),
+        "run_dir": str(run_dir_path) if run_dir_path else None,
+        "artifacts": artifacts,
+        "redaction": {
+            "status": redaction_payload["status"],
+            "finding_count": redaction_payload["finding_count"],
+        },
+    }
+    manifest_path = output_dir / "manifest.json"
+    manifest["manifest_path"] = str(manifest_path)
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    artifacts.append({"name": "manifest", "path": str(manifest_path)})
+    return manifest
+
+
+def _collect_redaction_findings(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return [
+            {
+                "file": str(path),
+                "line": 0,
+                "kind": "missing_path",
+                "detail": "path does not exist",
+            }
+        ]
+
+    findings: list[dict[str, Any]] = []
+    for file_path in _iter_scan_files(path):
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        except OSError as exc:
+            findings.append(
+                {
+                    "file": str(file_path),
+                    "line": 0,
+                    "kind": "read_error",
+                    "detail": str(exc),
+                }
+            )
+            continue
+
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            for finding in _redaction_findings_for_line(file_path, line_number, line):
+                findings.append(finding)
+
+    return findings
+
+
+def _iter_scan_files(path: Path) -> list[Path]:
+    if path.is_file():
+        return [path]
+
+    ignored_dirs = {".git", ".venv", "__pycache__", ".mypy_cache", ".ruff_cache", "node_modules"}
+    files: list[Path] = []
+    for file_path in sorted(path.rglob("*")):
+        if not file_path.is_file():
+            continue
+        if any(part in ignored_dirs for part in file_path.parts):
+            continue
+        try:
+            if file_path.stat().st_size > 2_000_000:
+                continue
+        except OSError:
+            continue
+        files.append(file_path)
+    return files
+
+
+def _redaction_findings_for_line(
+    file_path: Path,
+    line_number: int,
+    line: str,
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    secret_patterns = {
+        "bearer_token": re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b", re.IGNORECASE),
+        "openai_key": re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
+        "credential_assignment": re.compile(
+            r"(?i)\b(api[_-]?key|authorization|password|secret|token)\b\s*[:=]\s*['\"]?[^'\"\s]{8,}"
+        ),
+    }
+    for kind, pattern in secret_patterns.items():
+        if pattern.search(line):
+            findings.append(
+                {
+                    "file": str(file_path),
+                    "line": line_number,
+                    "kind": kind,
+                    "detail": "possible unredacted secret",
+                }
+            )
+
+    for raw_url in re.findall(r"https?://[^\s<>'\")]+", line):
+        url = raw_url.rstrip(".,;]")
+        parsed = urlparse(url)
+        sensitive_query = any(
+            key.lower() in {"token", "key", "secret", "signature", "expires", "auth"}
+            or any(part in key.lower() for part in ("token", "secret", "signature"))
+            for key in [item.split("=", 1)[0] for item in parsed.query.split("&") if item]
+        )
+        if parsed.username or parsed.password or sensitive_query or safe_report_url(url) is None:
+            findings.append(
+                {
+                    "file": str(file_path),
+                    "line": line_number,
+                    "kind": "unsafe_url",
+                    "detail": "URL would be removed or stripped in reports",
+                }
+            )
+
+    return findings
+
+
+def _target_policy(
+    url: str,
+    *,
+    allow_public: bool = False,
+    allowed_hosts: list[str] | None = None,
+) -> dict[str, Any]:
+    allowed_hosts = allowed_hosts or []
+    parsed = urlparse(url)
+    host = parsed.hostname
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+
+    base = {
+        "url": url,
+        "scheme": parsed.scheme,
+        "host": host,
+        "port": port,
+        "allowed": False,
+        "classification": "invalid",
+        "reason": "URL must include an http or https scheme and host",
+        "allow_public_target": allow_public,
+        "allowed_hosts": allowed_hosts,
+    }
+    if parsed.scheme not in {"http", "https"} or not host:
+        return base
+
+    normalized_host = host.strip("[]").lower()
+    if _host_matches_allowlist(normalized_host, allowed_hosts):
+        return {
+            **base,
+            "allowed": True,
+            "classification": "allowlisted",
+            "reason": "host matched operator allowlist",
+        }
+
+    classification = _classify_target_host(normalized_host)
+    local_allowed = classification in {"loopback", "private"}
+    if local_allowed or allow_public:
+        return {
+            **base,
+            "allowed": True,
+            "classification": classification,
+            "reason": "local/private target" if local_allowed else "allowed by explicit flag",
+        }
+
+    return {
+        **base,
+        "classification": classification,
+        "reason": "blocked unless host is local/private, allowlisted, or --allow-public-target is set",
+    }
+
+
+def _classify_target_host(host: str) -> str:
+    if host == "localhost" or host.endswith(".localhost"):
+        return "loopback"
+
+    addresses = _resolve_host_addresses(host)
+    if not addresses:
+        return "unresolved"
+    if all(address.is_loopback for address in addresses):
+        return "loopback"
+    if any(address.is_link_local for address in addresses):
+        return "link_local"
+    if any(address.is_multicast for address in addresses):
+        return "multicast"
+    if any(address.is_unspecified for address in addresses):
+        return "unspecified"
+    if any(address.is_reserved for address in addresses):
+        return "reserved"
+    if all(address.is_private for address in addresses):
+        return "private"
+    return "public"
+
+
+def _resolve_host_addresses(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    try:
+        return [ipaddress.ip_address(host)]
+    except ValueError:
+        pass
+
+    try:
+        return sorted(
+            {
+                ipaddress.ip_address(info[4][0])
+                for info in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+            },
+            key=str,
+        )
+    except socket.gaierror:
+        return []
+
+
+def _host_matches_allowlist(host: str, allowed_hosts: list[str]) -> bool:
+    for allowed in allowed_hosts:
+        normalized = allowed.strip().strip("[]").lower()
+        if not normalized:
+            continue
+        if normalized.startswith("*.") and host.endswith(normalized[1:]):
+            return True
+        if host == normalized:
+            return True
+    return False
+
+
 def _is_http_url(value: str) -> bool:
     """Return True when a URL is an HTTP or HTTPS URL."""
     parsed = urlparse(value)
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+async def _build_readiness_report(
+    *,
+    config_path: Path,
+    skip_provider_checks: bool = False,
+) -> dict[str, Any]:
+    """Build the local enterprise readiness evidence bundle."""
+
+    generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    config: Config | None = None
+    config_error: str | None = None
+    provider_results: dict[str, dict[str, Any]] = {}
+
+    try:
+        config = Config.load(config_path)
+    except Exception as exc:
+        config_error = str(exc)
+
+    suites = _readiness_suite_inventory(Path("suites"))
+    docs = _readiness_document_inventory()
+    checks: list[dict[str, Any]] = [
+        _readiness_check("config", config is not None, config_error or str(config_path)),
+        _readiness_check("uv_lock", Path("uv.lock").exists(), "uv.lock"),
+        _readiness_check("suite_catalog", len(suites) > 0, f"{len(suites)} suites"),
+        _readiness_check(
+            "security_policy",
+            Path("SECURITY.md").exists(),
+            "SECURITY.md",
+        ),
+        _readiness_check(
+            "interview_script",
+            Path("docs/enterprise/interview-demo-script.md").exists(),
+            "docs/enterprise/interview-demo-script.md",
+        ),
+        _readiness_check(
+            "production_audit",
+            Path("docs/audits/production-readiness-2026-05-18.md").exists(),
+            "docs/audits/production-readiness-2026-05-18.md",
+        ),
+    ]
+
+    if config and not skip_provider_checks:
+        doctor = ProviderDoctor(config)
+        provider_results = await doctor.check_all(benchmark=False)
+        has_ready_provider = any(
+            result.get("status") == "healthy" for result in provider_results.values()
+        )
+        checks.append(
+            _readiness_check(
+                "provider_reachability",
+                has_ready_provider,
+                f"{sum(1 for result in provider_results.values() if result.get('status') == 'healthy')} healthy providers",
+            )
+        )
+    elif config:
+        checks.append(
+            _readiness_check(
+                "provider_reachability",
+                True,
+                "skipped by operator",
+                status="skipped",
+            )
+        )
+
+    failed_required = [check for check in checks if check["status"] == "fail"]
+    skipped = [check for check in checks if check["status"] == "skipped"]
+    status = "ready"
+    if failed_required:
+        status = "needs_setup"
+    elif skipped:
+        status = "ready_with_skipped_checks"
+
+    return {
+        "status": status,
+        "generated_at": generated_at,
+        "ragfuzz_version": __version__,
+        "python_version": sys.version.split()[0],
+        "config_path": str(config_path),
+        "config": {
+            "loaded": config is not None,
+            "default_provider": config.default_provider if config else None,
+            "default_target": config.default_target if config else None,
+            "run_dir": config.run_dir if config else None,
+            "cache_dir": config.cache_dir if config else None,
+            "error": config_error,
+        },
+        "checks": checks,
+        "providers": provider_results,
+        "suites": suites,
+        "docs": docs,
+        "security_posture": {
+            "local_first_target_guard": True,
+            "report_url_sanitization": True,
+            "baseline_namespace_isolation": True,
+            "demo_security_headers": True,
+            "operator_target_check": True,
+            "operator_redact_check": True,
+            "local_audit_log": True,
+            "proxy_env_default": "disabled unless RAGFUZZ_HTTP_TRUST_ENV=true",
+        },
+        "recommended_demo_flow": [
+            "uv sync --locked --all-extras --dev",
+            "uv run ragfuzz doctor",
+            "uv run ragfuzz target-check http://127.0.0.1:8000",
+            "uv run ragfuzz providers-doctor --provider ollama",
+            "uv run ragfuzz run suites/rag-canary-leak.yaml --provider ollama --runs 1 --concurrency 1 --json-summary",
+            "uv run ragfuzz evidence-bundle --run-dir runs/<run_id> --output-dir evidence",
+            "uv run ragfuzz redact-check evidence",
+            "uv run ragfuzz demo --host 127.0.0.1 --port 8765 --no-open",
+        ],
+    }
+
+
+def _readiness_check(
+    name: str,
+    passed: bool,
+    detail: str,
+    *,
+    status: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "status": status or ("pass" if passed else "fail"),
+        "detail": detail,
+    }
+
+
+def _readiness_suite_inventory(suite_dir: Path) -> list[dict[str, Any]]:
+    suites: list[dict[str, Any]] = []
+    if not suite_dir.exists():
+        return suites
+    for path in sorted(suite_dir.glob("*.yaml")):
+        try:
+            suite = SuiteConfig.load(path)
+        except Exception as exc:
+            suites.append({"path": str(path), "status": "invalid", "error": str(exc)})
+            continue
+        suites.append(
+            {
+                "path": str(path),
+                "name": suite.name,
+                "run_type": suite.run_type,
+                "owasp": suite.owasp,
+                "risk_tags": suite.risk_tags,
+                "research_count": len(suite.research),
+                "seed_count": len(suite.inputs),
+            }
+        )
+    return suites
+
+
+def _readiness_document_inventory() -> dict[str, bool]:
+    paths = [
+        "README.md",
+        "quickstart.md",
+        "PRODUCT.md",
+        "DESIGN.md",
+        "SECURITY.md",
+        "docs/enterprise/interview-demo-script.md",
+        "docs/enterprise/client-install-handoff.md",
+        "docs/audits/production-readiness-2026-05-18.md",
+    ]
+    return {path: Path(path).exists() for path in paths}
+
+
+def _print_readiness_report(report: dict[str, Any]) -> None:
+    console.print(f"RAGFuzz readiness: [bold]{report['status']}[/bold]")
+    console.print(f"Version: {report['ragfuzz_version']}")
+    console.print(f"Generated: {report['generated_at']}")
+    if report.get("evidence_path"):
+        console.print(f"Evidence: [bold]{report['evidence_path']}[/bold]")
+    console.print("\nChecks:")
+    for check in report["checks"]:
+        status = str(check["status"]).upper()
+        console.print(f"  {status} {check['name']}: {check['detail']}")
+    console.print(f"\nSuites: {len(report['suites'])}")
+    console.print("Recommended demo flow:")
+    for command in report["recommended_demo_flow"]:
+        console.print(f"  {command}")
+
+
+def _is_allowed_target_url(value: str, *, allow_public: bool = False) -> bool:
+    """Return True when target URL is safe for local-first outbound calls."""
+    if allow_public:
+        return _is_http_url(value)
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = parsed.hostname
+    if not host:
+        return False
+    return _is_loopback_or_private_host(host)
+
+
+def _is_loopback_or_private_host(host: str) -> bool:
+    normalized = host.strip("[]").lower()
+    if normalized == "localhost" or normalized.endswith(".localhost"):
+        return True
+
+    try:
+        return _is_allowed_target_ip(ipaddress.ip_address(normalized))
+    except ValueError:
+        pass
+
+    try:
+        addresses = {
+            ipaddress.ip_address(info[4][0])
+            for info in socket.getaddrinfo(normalized, None, type=socket.SOCK_STREAM)
+        }
+    except socket.gaierror:
+        return False
+
+    return bool(addresses) and all(_is_allowed_target_ip(address) for address in addresses)
+
+
+def _is_allowed_target_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return (address.is_loopback or address.is_private) and not (
+        address.is_link_local
+        or address.is_multicast
+        or address.is_unspecified
+        or address.is_reserved
+    )
 
 
 def _select_chat_model(provider_id: str, configured_model: str, models: list[str]) -> str:

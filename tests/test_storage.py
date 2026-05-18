@@ -3,8 +3,11 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from ragfuzz.config import BudgetConfig, Config, ProviderConfig
 from ragfuzz.storage import RunDir
+from ragfuzz.storage.baseline import BaselineManager
 
 
 class TestRunDir:
@@ -86,3 +89,65 @@ class TestRunDir:
 
         data = json.loads(failure_path.read_text())
         assert data["case_id"] == "failed_case"
+
+
+class TestBaselineManager:
+    def test_baseline_suite_ids_cannot_escape_baseline_directory(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / ".baselines")
+
+        saved_path = Path(manager.save_baseline("../escaped", []))
+
+        assert saved_path.parent == tmp_path / ".baselines"
+        assert saved_path.name.startswith("escaped-")
+        assert (tmp_path / "escaped_4f53cda18c2baa0c.json").exists() is False
+
+    def test_baseline_hash_must_be_safe(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / ".baselines")
+
+        with pytest.raises(ValueError, match="baseline_hash"):
+            manager.load_baseline("suite", "../not-safe")
+
+    def test_delete_baseline_sanitizes_suite_ids(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / ".baselines")
+        saved_path = Path(manager.save_baseline("../escaped", []))
+
+        assert manager.delete_baseline("../escaped", "4f53cda18c2baa0c") is True
+        assert not saved_path.exists()
+
+    def test_baseline_suite_id_collisions_do_not_cross_wire(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / ".baselines")
+
+        first_path = Path(
+            manager.save_baseline(
+                "suite/a",
+                [{"case_id": "first", "scores": {"leak_score": 0.1}}],
+            )
+        )
+        second_path = Path(
+            manager.save_baseline(
+                "suite:a",
+                [{"case_id": "second", "scores": {"leak_score": 0.9}}],
+            )
+        )
+
+        first = manager.load_baseline("suite/a")
+        second = manager.load_baseline("suite:a")
+
+        assert first_path != second_path
+        assert first is not None
+        assert second is not None
+        assert first["suite_id"] == "suite/a"
+        assert first["cases"][0]["case_id"] == "first"
+        assert second["suite_id"] == "suite:a"
+        assert second["cases"][0]["case_id"] == "second"
+
+    def test_delete_baseline_does_not_remove_colliding_suite(self, tmp_path: Path) -> None:
+        manager = BaselineManager(tmp_path / ".baselines")
+        first_path = Path(manager.save_baseline("suite/a", []))
+        second_path = Path(manager.save_baseline("suite:a", []))
+
+        assert manager.delete_baseline("suite/a", "4f53cda18c2baa0c") is True
+
+        assert not first_path.exists()
+        assert second_path.exists()
+        assert manager.load_baseline("suite:a") is not None
