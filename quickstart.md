@@ -12,7 +12,7 @@ Get a real local RAGFuzz run working first, then use the demo dashboard for walk
 
 ```bash
 git clone https://github.com/JonathanRReed/RAGFuzz.git
-cd ragfuzz
+cd RAGFuzz
 uv sync --all-extras --dev
 ```
 
