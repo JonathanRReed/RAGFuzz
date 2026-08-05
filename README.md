@@ -28,7 +28,7 @@ Cloud provider setup is not required for the normal local workflow.
 
 ```bash
 git clone https://github.com/JonathanRReed/RAGFuzz.git
-cd ragfuzz
+cd RAGFuzz
 uv sync --all-extras --dev
 ```
 
