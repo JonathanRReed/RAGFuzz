@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from importlib import util as importlib_util
 from pathlib import Path
 
 import pytest
-import tomllib
 from typer.testing import CliRunner
 
 from ragfuzz import __version__
@@ -228,6 +228,8 @@ def test_research_backed_suites_load_with_metadata() -> None:
         "rag-indirect-prompt-injection.yaml",
         "rag-retrieval-conflict.yaml",
         "rag-poisoned-knowledge.yaml",
+        "rag-dos-flood.yaml",
+        "rag-multi-hop.yaml",
     }
 
     loaded = [SuiteConfig.load(path) for path in suite_paths]
@@ -240,6 +242,8 @@ def test_research_backed_suites_load_with_metadata() -> None:
         "poison-influence",
         "corpus-integrity",
     ]
+    assert by_name["rag-dos-flood"].run_type == "dos"
+    assert by_name["rag-multi-hop"].run_type == "multi-hop"
     assert all(suite.research for suite in loaded)
 
 
@@ -324,7 +328,9 @@ async def test_scheduler_propagates_suite_canary_and_target_id_into_failure_sign
     )
 
     assert len(cases) == 1
-    assert scorer.contexts == [{"canary": "ZXQ-491-AZ", "prompt": "seed prompt"}]
+    assert scorer.contexts == [
+        {"canary": "ZXQ-491-AZ", "prompt": "seed prompt", "run_id": "run-a"}
+    ]
 
     expected_signature = scheduler.corpus.calculate_failure_signature(
         suite_id="suite-a",
@@ -341,6 +347,7 @@ async def test_judge_scorer_selects_rubric_and_provider_model() -> None:
     class FakeJudgeProvider:
         def __init__(self) -> None:
             self.provider_id = "lmstudio:local-judge"
+            self.default_model = "judge-default"
             self.calls: list[dict[str, object]] = []
 
         async def chat(
@@ -375,7 +382,7 @@ async def test_judge_scorer_selects_rubric_and_provider_model() -> None:
         canary="ZXQ-491-AZ",
     )
 
-    assert provider.calls[0]["model"] == "local-judge"
+    assert provider.calls[0]["model"] == "judge-default"
     assert provider.calls[0]["temperature"] == 0.1
     assert provider.calls[0]["max_tokens"] == 300
 

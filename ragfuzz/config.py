@@ -3,12 +3,7 @@
 from __future__ import annotations
 
 import os
-import sys
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -23,6 +18,9 @@ RUN_TYPES = {
     "jailbreak",
     "leakage",
     "multi-turn",
+    "dos",
+    "soft-ad",
+    "multi-hop",
 }
 
 
@@ -164,7 +162,7 @@ class Config:
 type = "openai_compat"
 base_url = "http://localhost:1234/v1"
 api_key_env = "LM_STUDIO_API_KEY"  # Optional for LM Studio
-default_model = "local-model"
+default_model = "auto"
 
 [providers.ollama]
 type = "openai_compat"
@@ -176,7 +174,7 @@ default_model = "auto"
 type = "openai_compat"
 base_url = "http://localhost:8000/v1"
 api_key_env = "VLLM_API_KEY"  # Optional for local vLLM
-default_model = "local-model"
+default_model = "auto"
 
 [budget]
 max_runs = 1000

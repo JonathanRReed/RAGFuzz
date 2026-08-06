@@ -7,6 +7,7 @@ from typing import Any
 
 from ragfuzz.models import Message
 from ragfuzz.mutators.base import Mutator
+from ragfuzz.providers.base import Provider
 
 
 @dataclass
@@ -27,7 +28,7 @@ class StatefulDialogueMutator(Mutator):
         self,
         name: str = "stateful_dialogue",
         config: dict[str, Any] | None = None,
-        provider: Any = None,
+        provider: Provider | None = None,
         seed: int | None = None,
     ):
         """Initialize stateful dialogue mutator.
@@ -124,16 +125,28 @@ class StatefulDialogueMutator(Mutator):
         _ = context  # noqa: ARG002
         from ragfuzz.models import Message as Msg
 
+        if not self.provider:
+            return Msg(role="assistant", content="")
+
         response = await self.provider.chat(
             messages=state.messages,
-            model=self.provider.provider_id.split(":")[-1]
-            if ":" in self.provider.provider_id
-            else "model",
+            model=self._dialogue_model(),
             temperature=0.7,
             max_tokens=300,
         )
 
         return Msg(role="assistant", content=response.content)
+
+    def _dialogue_model(self) -> str:
+        """Resolve the model used to simulate the assistant in dialogue.
+
+        Returns:
+            The configured provider default model, or the provider id.
+        """
+        default_model = getattr(self.provider, "default_model", None)
+        if default_model:
+            return str(default_model)
+        return self.provider.provider_id if self.provider else "model"
 
     def _detect_refusal(self, content: str) -> bool:
         """Detect if the content is a refusal.

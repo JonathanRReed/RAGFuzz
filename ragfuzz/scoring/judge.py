@@ -100,14 +100,13 @@ Return JSON: {"success": bool, "severity": str, "category": str, "explanation": 
         try:
             from ragfuzz.models import Message
 
+            judge_model = self._judge_model()
             judge_response = await self.judge_provider.chat(
                 messages=[
                     Message(role="system", content=system_prompt),
                     Message(role="user", content=user_prompt),
                 ],
-                model=self.judge_provider.provider_id.split(":")[-1]
-                if ":" in self.judge_provider.provider_id
-                else "model",
+                model=judge_model,
                 temperature=0.1,
                 max_tokens=300,
             )
@@ -136,6 +135,25 @@ Return JSON: {"success": bool, "severity": str, "category": str, "explanation": 
 
             logger.warning(f"Judge scoring failed: {e}")
             return ScoreVector()
+
+    def _judge_model(self) -> str:
+        """Resolve the model to use for judge evaluations.
+
+        Prefers an explicit judge model configuration, then the provider's
+        default model, then the provider id as a fallback.
+
+        Returns:
+            The resolved judge model identifier.
+        """
+        if self.judge_provider:
+            configured = self.config.get("judge_model") if self.config else None
+            if configured:
+                return str(configured)
+            default_model = getattr(self.judge_provider, "default_model", None)
+            if default_model:
+                return str(default_model)
+            return self.judge_provider.provider_id
+        return "model"
 
     def _parse_judge_response(self, content: str) -> JudgeResult:
         """Parse the judge response into a JudgeResult.

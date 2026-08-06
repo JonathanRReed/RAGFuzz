@@ -29,7 +29,7 @@ class ProviderDoctor:
         Returns:
             Dictionary mapping provider IDs to health reports.
         """
-        results = {}
+        results: dict[str, Any] = {}
 
         tasks = [
             self.check_provider(provider_id, benchmark) for provider_id in self.config.providers
@@ -37,7 +37,9 @@ class ProviderDoctor:
 
         provider_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for provider_id, result in zip(self.config.providers, provider_results, strict=False):
+        provider_ids = list(self.config.providers)
+        for index, provider_id in enumerate(provider_ids):
+            result = provider_results[index] if index < len(provider_results) else None
             if isinstance(result, BaseException):
                 results[provider_id] = {
                     "status": "error",

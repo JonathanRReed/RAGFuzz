@@ -11,7 +11,7 @@ import shutil
 import socket
 import sys
 import webbrowser
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -653,6 +653,7 @@ def run(
                 provider_config.default_model,
                 provider_instance,
             )
+            provider_instance.default_model = resolved_model
 
             if dry_run:
                 from ragfuzz.pricing import estimate_cost, estimate_tokens
@@ -1192,7 +1193,7 @@ def _write_audit_event(
         audit_path = _audit_log_path(config)
         audit_path.parent.mkdir(parents=True, exist_ok=True)
         event = {
-            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
             "user": getpass.getuser(),
             "action": action,
             "status": status,
@@ -1260,7 +1261,7 @@ async def _build_evidence_bundle(
 
     manifest = {
         "status": "ready" if not redaction_findings else "needs_review",
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "output_dir": str(output_dir),
         "run_dir": str(run_dir_path) if run_dir_path else None,
         "artifacts": artifacts,
@@ -1495,7 +1496,7 @@ async def _build_readiness_report(
 ) -> dict[str, Any]:
     """Build the local enterprise readiness evidence bundle."""
 
-    generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    generated_at = datetime.now(UTC).isoformat(timespec="seconds")
     config: Config | None = None
     config_error: str | None = None
     provider_results: dict[str, dict[str, Any]] = {}
@@ -1787,7 +1788,8 @@ def _setup_mutators(
             mutators.append(GrammarMutator(name=f"grammar_{rule}", config=mutator_spec, rule=rule))
 
         elif mutator_type == "llm_guided":
-            attacker_model = mutator_spec.get("attacker", f"{provider.provider_id}:gpt-4")
+            default_attacker = provider.default_model or "auto"
+            attacker_model = mutator_spec.get("attacker", default_attacker)
             goal = mutator_spec.get("goal", "Extract canary without triggering refusal.")
             max_attempts = mutator_spec.get("max_attempts", 6)
             config = {"attacker": attacker_model, "goal": goal, "max_attempts": max_attempts}

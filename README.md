@@ -1,6 +1,6 @@
 # RAGFuzz
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: FSL-1.1-MIT](https://img.shields.io/badge/license-FSL--1.1--MIT-orange.svg)](./LICENSE)
 
 RAGFuzz is a local-first RAG security evaluation workspace. It fuzzes chat and RAG systems, scores failures, records replayable evidence, and generates redacted reports for product, client, and recruiter demos.
@@ -18,8 +18,8 @@ Cloud provider setup is not required for the normal local workflow.
 - Checks local provider readiness and available models.
 - Lets you choose the model under test.
 - Runs adversarial prompt and RAG security suites.
-- Supports leakage, prompt injection, jailbreak, poisoning, retrieval robustness, faithfulness, and multi-turn run types.
-- Scores canary leaks, policy violations, partial success, refusal latency, tool errors, and poison influence.
+- Supports leakage, prompt injection, jailbreak, poisoning, retrieval robustness, faithfulness, multi-turn, white DoS / context flood, soft-ad, and multi-hop run types.
+- Scores canary leaks, policy violations, partial success, refusal latency, tool errors, poison influence, source trust, retrieval rank drift, conflict recovery, citation grounding, multi-hop evidence loss, and context-flood degradation.
 - Stores normal CLI run artifacts under `runs/`.
 - Generates HTML, Markdown, and JSON report outputs with redaction.
 - Provides a FastAPI demo app with onboarding, live progress streaming, provider setup checks, model selection, and report drilldowns.
@@ -34,7 +34,7 @@ uv sync --all-extras --dev
 
 Requirements:
 
-- Python 3.9 or newer
+- Python 3.11 or newer
 - uv
 - One local model server, usually Ollama, LM Studio, or vLLM
 
@@ -204,6 +204,9 @@ Supported run types:
 - `jailbreak`
 - `leakage`
 - `multi-turn`
+- `dos` (white denial-of-service / context flood)
+- `soft-ad` (attacker text mixed into retrieval context)
+- `multi-hop` (evidence-chain degradation)
 
 Included research-backed starter suites:
 
@@ -211,6 +214,8 @@ Included research-backed starter suites:
 - `suites/rag-indirect-prompt-injection.yaml`, indirect prompt injection from untrusted retrieved content.
 - `suites/rag-retrieval-conflict.yaml`, SafeRAG and RARE-style noisy retrieval, stale context, and inter-context conflict checks.
 - `suites/rag-poisoned-knowledge.yaml`, poisoned knowledge and source-trust influence checks.
+- `suites/rag-dos-flood.yaml`, SafeRAG white-DoS context flooding and silver-noise degradation checks.
+- `suites/rag-multi-hop.yaml`, RARE multi-hop evidence-loss and ungrounded-hallucination checks.
 
 ## CLI Reference
 
@@ -326,8 +331,11 @@ RAGFuzz is shaped by current RAG evaluation and LLM security work:
 For the current research and peer-tool upgrade map, see
 [docs/research/ragfuzz-research-and-peer-audit-2026-05-12.md](docs/research/ragfuzz-research-and-peer-audit-2026-05-12.md).
 
+For the 2026-08 research round that shipped retrieval-conditioned scoring, see
+[docs/research/ragfuzz-research-round-2026-08-06.md](docs/research/ragfuzz-research-round-2026-08-06.md).
+
 For production-readiness checks and remaining risks, see
-[docs/audits/production-readiness-2026-05-18.md](docs/audits/production-readiness-2026-05-18.md).
+[docs/audits/production-readiness-2026-08-06.md](docs/audits/production-readiness-2026-08-06.md).
 
 ## Troubleshooting
 

@@ -97,7 +97,7 @@ class TestConfig:
         assert config.providers["lmstudio"].base_url == "http://localhost:1234/v1"
         assert config.providers["ollama"].base_url == "http://localhost:11434/v1"
         assert config.providers["vllm"].base_url == "http://localhost:8000/v1"
-        assert config.providers["lmstudio"].default_model == "local-model"
+        assert config.providers["lmstudio"].default_model == "auto"
         assert config.providers["ollama"].default_model == "auto"
         assert config.default_provider == "ollama"
 

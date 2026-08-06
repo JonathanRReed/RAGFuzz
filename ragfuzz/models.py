@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -27,7 +27,7 @@ class Response(BaseModel):
 
     content: str
     model: str
-    usage: dict[str, int] = Field(default_factory=dict)
+    usage: dict[str, Any] = Field(default_factory=dict)
     tool_calls: list[ToolCall] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     trace_id: str | None = None
@@ -45,6 +45,14 @@ class ScoreVector(BaseModel):
     faithfulness_score: float = 0.0
     retrieval_relevance_score: float = 0.0
     leakage_score: float = 0.0
+    # Retrieval-conditioned robustness metrics (RARE-Met, SafeRAG, OWASP LLM08).
+    # Higher values mean higher risk: a degraded or ungrounded RAG pipeline.
+    source_trust_score: float = 0.0
+    retrieval_rank_drift: float = 0.0
+    conflict_recovery_score: float = 0.0
+    citation_grounding_score: float = 0.0
+    multi_hop_score: float = 0.0
+    dos_degradation_score: float = 0.0
 
 
 class Case(BaseModel):
@@ -64,7 +72,7 @@ class Case(BaseModel):
     trace_id: str | None = None
     rag_lens_url: str | None = None
     retrieval_snapshot: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     failure_signature: str | None = None
     mutation_graph_node_id: str | None = None
     mutation_path: list[dict[str, Any]] = Field(default_factory=list)

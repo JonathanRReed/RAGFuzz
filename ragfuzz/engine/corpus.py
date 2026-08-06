@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from heapq import nlargest
 from typing import Any
-
-import numpy as np
 
 from ragfuzz.models import ScoreVector
 
@@ -108,7 +107,7 @@ class Corpus:
         )
 
         # Sigmoid function
-        p_fail = 1.0 / (1.0 + np.exp(-(weighted_sum - self.bias)))
+        p_fail = 1.0 / (1.0 + math.exp(-(weighted_sum - self.bias)))
 
         return float(p_fail)
 
@@ -252,7 +251,7 @@ class Corpus:
         return {
             "total_entries": len(self.entries),
             "unique_failures": unique_failures,
-            "avg_energy": np.mean(energies) if energies else 0.0,
+            "avg_energy": sum(energies) / len(energies) if energies else 0.0,
             "max_energy": max(energies) if energies else 0.0,
             "high_energy_count": len([e for e in self.entries if e.energy >= 0.5]),
         }

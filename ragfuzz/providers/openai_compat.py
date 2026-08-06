@@ -28,6 +28,7 @@ class OpenAICompatProvider(Provider):
         api_key: str | None = None,
         default_headers: dict[str, str] | None = None,
         max_retries: int = 3,
+        default_model: str | None = None,
     ):
         """Initialize the OpenAI-compatible provider.
 
@@ -37,6 +38,9 @@ class OpenAICompatProvider(Provider):
             api_key: Optional API key for authentication.
             default_headers: Additional default headers to include.
             max_retries: Maximum number of retry attempts.
+            default_model: Optional default model identifier used by
+                auxiliary consumers (judge, attacker mutators) when no
+                explicit model is configured.
         """
         super().__init__(provider_id, base_url, api_key)
         self.default_headers = default_headers or {}
@@ -44,6 +48,7 @@ class OpenAICompatProvider(Provider):
         self._supports_streaming = True
         self._supports_tools = True
         self._max_context_estimate = 4096
+        self.default_model = default_model
 
     async def chat(
         self,

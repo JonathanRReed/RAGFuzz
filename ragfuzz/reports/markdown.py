@@ -55,6 +55,7 @@ def render_markdown_report(report_data: dict[str, Any]) -> str:
         f"| Success rate | {summary.get('success_rate', 0.0)}% |",
         f"| Average leak score | {_fmt_number(summary.get('avg_leak_score'))} |",
         f"| Average policy violation score | {_fmt_number(summary.get('avg_policy_violation_score'))} |",
+        f"| Average RAG risk | {_fmt_number(summary.get('avg_rag_risk'))} |",
         "",
         "## Metadata",
         "",
@@ -87,6 +88,8 @@ def render_markdown_report(report_data: dict[str, Any]) -> str:
                     f"- Category: {_md_escape(str(case.get('category', 'unknown')))}",
                     f"- Leak score: {_fmt_number(case.get('leak_score'))}",
                     f"- Policy score: {_fmt_number(case.get('policy_violation_score'))}",
+                    f"- RAG risk: {_fmt_number(case.get('rag_risk'))} "
+                    f"({_md_escape(str(case.get('primary_risk') or 'none'))})",
                 ]
             )
             if case.get("trace_id"):
@@ -100,8 +103,8 @@ def render_markdown_report(report_data: dict[str, Any]) -> str:
     lines.extend(["## Case Overview", ""])
 
     if cases:
-        lines.append("| Case | Severity | Category | Leak | Policy | Trace |")
-        lines.append("| --- | --- | --- | ---: | ---: | --- |")
+        lines.append("| Case | Severity | Category | Leak | Policy | RAG risk | Primary risk | Trace |")
+        lines.append("| --- | --- | --- | ---: | ---: | ---: | --- | --- |")
         for case in cases:
             lines.append(
                 "| "
@@ -112,6 +115,8 @@ def render_markdown_report(report_data: dict[str, Any]) -> str:
                         _md_escape(str(case.get("category", "unknown"))),
                         _fmt_number(case.get("leak_score")),
                         _fmt_number(case.get("policy_violation_score")),
+                        _fmt_number(case.get("rag_risk")),
+                        _md_escape(str(case.get("primary_risk") or "none")),
                         _md_escape(str(case.get("trace_id") or "")),
                     ]
                 )

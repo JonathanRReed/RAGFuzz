@@ -69,6 +69,8 @@ def _render_case_rows(cases: list[dict[str, Any]]) -> str:
             f"<td>{escape(str(case.get('category', 'unknown')))}</td>"
             f"<td>{_format_number(case.get('leak_score'))}</td>"
             f"<td>{_format_number(case.get('policy_violation_score'))}</td>"
+            f"<td>{_format_number(case.get('rag_risk'))}</td>"
+            f"<td>{escape(str(case.get('primary_risk') or ''))}</td>"
             f"<td>{escape(str(case.get('trace_id') or ''))}</td>"
             f"<td class=\"snippet\">{escape(str(case.get('input_text', '')))}</td>"
             "</tr>"
@@ -102,7 +104,9 @@ def _render_failure_cards(failures: list[dict[str, Any]]) -> str:
             "</div>"
             f"<div class=\"failure-meta\">Category: {escape(str(case.get('category', 'unknown')))}"
             f" · Leak: {_format_number(case.get('leak_score'))}"
-            f" · Policy: {_format_number(case.get('policy_violation_score'))}</div>"
+            f" · Policy: {_format_number(case.get('policy_violation_score'))}"
+            f" · RAG risk: {_format_number(case.get('rag_risk'))}"
+            f" ({escape(str(case.get('primary_risk') or 'none'))})</div>"
             f"<pre>{escape(str(case.get('input_text', '')))}</pre>"
             f"<div class=\"failure-links\">{links_html}</div>"
             "</article>"
@@ -130,6 +134,7 @@ def render_html_report(report_data: dict[str, Any]) -> str:
             "Avg policy score",
             _format_number(summary.get("avg_policy_violation_score")),
         ),
+        ("Avg RAG risk", _format_number(summary.get("avg_rag_risk"))),
     ]
 
     cards_html = "".join(
@@ -468,6 +473,8 @@ def render_html_report(report_data: dict[str, Any]) -> str:
                                 <th>Category</th>
                                 <th>Leak</th>
                                 <th>Policy</th>
+                                <th>RAG risk</th>
+                                <th>Primary risk</th>
                                 <th>Trace</th>
                                 <th>Input</th>
                             </tr>

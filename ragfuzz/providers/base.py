@@ -21,6 +21,7 @@ class Provider:
         self.provider_id = provider_id
         self.base_url = base_url
         self.api_key = api_key
+        self.default_model: str | None = None
 
     async def chat(
         self,

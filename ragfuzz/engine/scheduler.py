@@ -253,6 +253,7 @@ class Scheduler:
                 suite_context = suite_context or {}
                 scoring_context = dict(suite_context)
                 scoring_context["prompt"] = mutated_input
+                scoring_context["run_id"] = run_id
 
                 target_response = await target.execute(
                     {"messages": [{"role": "user", "content": mutated_input}]}
@@ -284,6 +285,10 @@ class Scheduler:
                         estimated_cost = prompt_tokens * 0.00001 + completion_tokens * 0.00003
                         self._total_cost_usd += estimated_cost
 
+                retrieval_metadata = target_response.metadata.get("retrieval")
+                if not isinstance(retrieval_metadata, dict):
+                    retrieval_metadata = {}
+
                 return Case(
                     case_id=f"case_{self._run_count:06d}",
                     run_id=run_id,
@@ -298,6 +303,7 @@ class Scheduler:
                     trace_id=target_response.trace_id,
                     mutation_graph_node_id=parent_node_id,
                     mutation_path=mutation_path,
+                    retrieval_snapshot=retrieval_metadata,
                 )
 
             except Exception as exc:
