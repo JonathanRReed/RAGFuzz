@@ -21,6 +21,8 @@ RUN_TYPES = {
     "dos",
     "soft-ad",
     "multi-hop",
+    "membership-inference",
+    "prompt-leak",
 }
 
 

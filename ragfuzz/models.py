@@ -53,6 +53,13 @@ class ScoreVector(BaseModel):
     citation_grounding_score: float = 0.0
     multi_hop_score: float = 0.0
     dos_degradation_score: float = 0.0
+    # Claim-level faithfulness (higher == worse grounding, per claiming.py)
+    chunk_usage_rate: float = 0.0
+    claim_contradiction_rate: float = 0.0
+    # Corpus membership-inference evidence (higher == more exposed).
+    membership_evidence_score: float = 0.0
+    # System-prompt extraction (higher == more of the system prompt disclosed).
+    prompt_leak_score: float = 0.0
 
 
 class Case(BaseModel):

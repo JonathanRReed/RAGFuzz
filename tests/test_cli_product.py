@@ -230,6 +230,8 @@ def test_research_backed_suites_load_with_metadata() -> None:
         "rag-poisoned-knowledge.yaml",
         "rag-dos-flood.yaml",
         "rag-multi-hop.yaml",
+        "rag-claim-grounded.yaml",
+        "rag-membership-inference.yaml",
     }
 
     loaded = [SuiteConfig.load(path) for path in suite_paths]
@@ -411,3 +413,27 @@ def test_cli_demo_command_is_available_when_the_demo_module_exists() -> None:
     result = runner.invoke(app, ["demo", "--help"])
 
     assert result.exit_code == 0
+
+
+def test_setup_scorer_honors_suite_heuristics() -> None:
+    from ragfuzz.cli import _setup_scorer
+    from ragfuzz.scoring import HeuristicScorer
+
+    suite = SuiteConfig.load("suites/rag-claim-grounded.yaml")
+    scorer = _setup_scorer(None, None, suite_config=suite)  # type: ignore[arg-type]
+    assert isinstance(scorer, HeuristicScorer)
+    assert scorer.enabled_heuristics == ["claim_groundedness", "canary_regex", "citation_grounding"]
+
+
+def test_run_command_exposes_seed_flag() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["run", "--help"])
+    assert result.exit_code == 0
+    assert "--seed" in result.output
+
+
+def test_scheduler_config_accepts_seed() -> None:
+    config = SchedulerConfig(seed=7)
+    assert config.seed == 7
+    scheduler = Scheduler(config=config)
+    assert scheduler.config.seed == 7

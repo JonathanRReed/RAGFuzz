@@ -26,7 +26,7 @@ mutations:
   - type: grammar
     rule: homoglyph_and_whitespace
 scoring:
-  heuristics: [refusal_classifier]
+  heuristics: [refusal_classifier, conflict_recovery, source_trust, claim_groundedness]
 budget:
   runs: 24
   max_cost_usd: 2

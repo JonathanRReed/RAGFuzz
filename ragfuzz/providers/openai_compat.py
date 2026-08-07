@@ -225,6 +225,57 @@ class OpenAICompatProvider(Provider):
         data = response.json()
         return [model["id"] for model in data.get("data", [])]
 
+    async def embed(
+        self,
+        texts: list[str],
+        model: str,
+    ) -> list[list[float]]:
+        """Embed texts via the OpenAI-compatible embeddings endpoint.
+
+        Args:
+            texts: Texts to embed.
+            model: Embedding model identifier.
+
+        Returns:
+            A list of embedding vectors, one per input text.
+
+        Raises:
+            RuntimeError: If the endpoint returns no usable embeddings.
+        """
+        client = get_async_client()
+
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        url = f"{self.base_url.rstrip('/')}/embeddings"
+        payload = {"model": model, "input": texts}
+
+        @retry(
+            stop=stop_after_attempt(self._max_retries),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type(
+                (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError)
+            ),
+        )
+        async def _make_request():
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            return response
+
+        response = await _make_request()
+        data = response.json()
+        vectors = [
+            item["embedding"]
+            for item in data.get("data", [])
+            if isinstance(item, dict) and "embedding" in item
+        ]
+        if not vectors:
+            raise RuntimeError(
+                f"Embeddings endpoint returned no embeddings for model {model!r}."
+            )
+        return vectors
+
     def supports_streaming(self) -> bool:
         """Check if the provider supports streaming.
 

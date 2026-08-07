@@ -212,6 +212,10 @@ _RAG_SCORE_KEYS = (
     "citation_grounding_score",
     "multi_hop_score",
     "dos_degradation_score",
+    "faithfulness_score",
+    "chunk_usage_rate",
+    "claim_contradiction_rate",
+    "membership_evidence_score",
 )
 
 

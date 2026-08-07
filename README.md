@@ -19,7 +19,7 @@ Cloud provider setup is not required for the normal local workflow.
 - Lets you choose the model under test.
 - Runs adversarial prompt and RAG security suites.
 - Supports leakage, prompt injection, jailbreak, poisoning, retrieval robustness, faithfulness, multi-turn, white DoS / context flood, soft-ad, and multi-hop run types.
-- Scores canary leaks, policy violations, partial success, refusal latency, tool errors, poison influence, source trust, retrieval rank drift, conflict recovery, citation grounding, multi-hop evidence loss, and context-flood degradation.
+- Scores canary leaks, policy violations, partial success, refusal latency, tool errors, poison influence, source trust, retrieval rank drift, conflict recovery, citation grounding, multi-hop evidence loss, context-flood degradation, claim-level faithfulness, and corpus membership-inference evidence.
 - Stores normal CLI run artifacts under `runs/`.
 - Generates HTML, Markdown, and JSON report outputs with redaction.
 - Provides a FastAPI demo app with onboarding, live progress streaming, provider setup checks, model selection, and report drilldowns.
@@ -207,6 +207,8 @@ Supported run types:
 - `dos` (white denial-of-service / context flood)
 - `soft-ad` (attacker text mixed into retrieval context)
 - `multi-hop` (evidence-chain degradation)
+- `membership-inference` (corpus membership / MEntA-style disclosure)
+- `prompt-leak` (system-prompt and context extraction via retrieval)
 
 Included research-backed starter suites:
 
@@ -216,6 +218,15 @@ Included research-backed starter suites:
 - `suites/rag-poisoned-knowledge.yaml`, poisoned knowledge and source-trust influence checks.
 - `suites/rag-dos-flood.yaml`, SafeRAG white-DoS context flooding and silver-noise degradation checks.
 - `suites/rag-multi-hop.yaml`, RARE multi-hop evidence-loss and ungrounded-hallucination checks.
+- `suites/rag-claim-grounded.yaml`, claim-level faithfulness: per-claim grounding, chunk usage, and contradiction scans over unused context.
+- `suites/rag-membership-inference.yaml`, black-box corpus membership probes with member/non-member separation (MEntA/E-MIA style).
+- `suites/rag-prompt-leak.yaml`, system-prompt and instruction extraction probes (OWASP LLM08).
+- `suites/rag-hub-detection.yaml`, adversarial-hubness detection over grey-box retrieval snapshots (Cisco arXiv:2502.08384).
+
+Scoring heuristics listed under `scoring.heuristics` are validated against a
+registry (unknown names fail fast) and gate which signals are computed per case;
+declare only what your suite measures. New in 0.4.0: `prompt_leak` and `hubness`
+join `claim_groundedness`, `membership`, and the rest.
 
 ## CLI Reference
 
@@ -231,13 +242,15 @@ uv run ragfuzz target-check URL [--allowed-host HOST] [--allow-public-target] [-
 uv run ragfuzz redact-check PATH [--json]
 uv run ragfuzz evidence-bundle [--run-dir RUN_DIR] [--output-dir evidence] [--skip-provider-checks] [--json]
 uv run ragfuzz check-api URL [--headers JSON] [--allow-public-target]
-uv run ragfuzz run SUITE --provider PROVIDER [--runs N] [--concurrency N] [--dry-run] [--json-summary] [--allow-public-target]
+uv run ragfuzz run SUITE --provider PROVIDER [--runs N] [--concurrency N] [--dry-run] [--seed N] [--semantic] [--embedding-model MODEL] [--json-summary] [--allow-public-target]
 uv run ragfuzz report RUN_DIR [--html] [--md] [--json]
 uv run ragfuzz replay CASE_JSON --provider PROVIDER
 uv run ragfuzz baseline-save SUITE CASES_JSONL
 uv run ragfuzz baseline-check SUITE CASES_JSONL
 uv run ragfuzz cache-cleanup [--max-age SECONDS]
 uv run ragfuzz corpus-stats RUN_DIR
+uv run ragfuzz corpus-hubs RUN_DIR [--limit N] [--json]
+uv run ragfuzz benchmark [RUN_DIR] [--adversarial/--no-adversarial] [--json]
 uv run ragfuzz bisect RUN_A RUN_B
 uv run ragfuzz viz CASE_JSON [--format ascii|mermaid] [--output PATH]
 ```

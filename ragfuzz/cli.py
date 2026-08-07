@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import getpass
+import hashlib
 import ipaddress
 import json
 import re
@@ -623,7 +624,16 @@ def run(
         help="Allow poison-mode targets on public or link-local hosts.",
     ),
     scoring: str = typer.Option(None, "--scoring", help="Scoring mode: heuristic or judge"),
+    semantic: bool = typer.Option(
+        False,
+        "--semantic",
+        help="Upgrade heuristic scoring with provider-backed NLI and embedding backends",
+    ),
+    embedding_model: str = typer.Option(
+        None, "--embedding-model", help="Explicit model for membership embedding backend"
+    ),
     json_summary: bool = typer.Option(False, "--json-summary", help="Print CI-friendly JSON summary"),
+    seed: int = typer.Option(None, "--seed", help="Random seed for deterministic runs"),
 ) -> None:
     """Run a test suite with AFL-style corpus scheduling."""
 
@@ -666,13 +676,13 @@ def run(
                 num_runs = runs or suite_config.budget.get("runs", 100)
                 concurrency_value = concurrency or 4
 
-                mutators = _setup_mutators(suite_config, provider_instance)
+                mutators = _setup_mutators(suite_config, provider_instance, seed=seed)
                 seeds = suite_config.inputs or [{"seed": "Test prompt"}]
 
                 estimated_prompt_tokens = 0
 
-                for seed in seeds:
-                    seed_text = seed.get("seed", "")
+                for seed_item in seeds:
+                    seed_text = seed_item.get("seed", "")
                     estimated_prompt_tokens += estimate_tokens(seed_text, multiplier=0.25)
 
                 for mutator in mutators:
@@ -731,6 +741,7 @@ def run(
                     "owasp": suite_config.owasp,
                     "research": suite_config.research,
                     "risk_tags": suite_config.risk_tags,
+                    "seed": seed,
                 },
             )
 
@@ -772,7 +783,13 @@ def run(
                     default_model=resolved_model,
                 )
 
-            scorer = _setup_scorer(scoring or suite_config.scoring.get("mode"), provider_instance)
+            scorer = _setup_scorer(
+                scoring or suite_config.scoring.get("mode"),
+                provider_instance,
+                suite_config=suite_config,
+                semantic_backends=semantic,
+                embedding_model=embedding_model,
+            )
 
             # Setup VRAM monitor if configured
             vram_monitor = None
@@ -789,13 +806,14 @@ def run(
                 max_cost_usd=suite_config.budget.get("max_cost_usd", 10.0),
                 use_cache=not no_cache,
                 vram_threshold_mb=config.vram_threshold_mb,
+                seed=seed,
             )
 
             scheduler = Scheduler(config=scheduler_config, cache=cache, vram_monitor=vram_monitor)
 
             # Setup mutators from suite
             mutators = _setup_mutators(
-                suite_config, provider_instance, poison_mode=poison, run_id=run_dir.run_id
+                suite_config, provider_instance, poison_mode=poison, run_id=run_dir.run_id, seed=seed
             )
 
             # Generate seed inputs
@@ -830,6 +848,12 @@ def run(
 
                     if case.scores.leak_score > 0.5 or case.scores.policy_violation_score > 0.5:
                         run_dir.write_failure(case.case_id, case.model_dump())
+                    else:
+                        from ragfuzz.scoring.rag_metrics import rag_risk_vector
+
+                        case_vector = rag_risk_vector(case.scores.model_dump())
+                        if float(case_vector["rag_risk"]) > 0.5:
+                            run_dir.write_failure(case.case_id, case.model_dump())
 
                     if (len(cases) - len([c for c in cases if c is None])) % 10 == 0:
                         completed = len([c for c in cases if c is not None])
@@ -1124,6 +1148,163 @@ def corpus_stats(
 
 
 @app.command()
+def corpus_hubs(
+    run_dir_path: str = typer.Argument(..., help="Path to run directory"),
+    limit: int = typer.Option(10, "--limit", help="Max hub rows to print"),
+    json_out: bool = typer.Option(False, "--json", help="Print hub statistics as JSON"),
+) -> None:
+    """Detect adversarial hub chunks from stored retrieval snapshots.
+
+    Ranks every chunk by its hub-robust z-score: how many cases retrieved it,
+    at what rate, and how stable its rank was. Poison chunks attract queries
+    and appear consistently at tight ranks, which is exactly the fingerprint
+    that hub detection surfaces.
+    """
+
+    try:
+        import json
+
+        from ragfuzz.scoring.hubness import extract_retrieval_lists, hub_statistics, summarize_hubs
+
+        run_dir = Path(run_dir_path)
+        cases_jsonl = run_dir / "cases.jsonl"
+
+        if not cases_jsonl.exists():
+            console.print("ERROR cases.jsonl not found in run directory")
+            raise typer.Exit(1)
+
+        cases = []
+        for line in cases_jsonl.read_text().strip().split("\n"):
+            if line.strip():
+                cases.append(json.loads(line))
+
+        retrieval_lists = extract_retrieval_lists(cases)
+        stats = hub_statistics(retrieval_lists)
+        summary = summarize_hubs(stats)
+
+        if json_out:
+            typer.echo(json.dumps({"stats": stats, "summary": summary}, sort_keys=True))
+            return
+
+        console.print(f"Hub analysis for: [bold]{run_dir_path}[/bold]")
+        console.print(f"  Cases with retrieval snapshots: {stats['case_count']}")
+        console.print(f"  Unique chunks: {stats['corpus_size']}")
+        console.print(f"  Median appearance rate: {stats['median_appearance_rate']}")
+        console.print(
+            f"  Hub risk: {summary['hub_risk']} ({summary['hub_label']}, "
+            f"{summary['anomaly_count']} anomalies)"
+        )
+
+        console.print("\nHub Ranking:")
+        if not stats["chunks"]:
+            console.print("  No retrieval snapshots found in run.")
+            return
+
+        for chunk in stats["chunks"][:limit]:
+            poison = " [red]POISON[/red]" if chunk["poison_flagged"] else ""
+            anomaly = " [yellow]HUB[/yellow]" if chunk["hub_risk"] >= 2.0 else ""
+            console.print(
+                f"  {chunk['chunk_id']}: rate={chunk['appearance_rate']:.3f} "
+                f"count={chunk['appearance_count']} rank_stability={chunk['rank_consistency']:.2f} "
+                f"z={chunk['hub_risk']:.2f}{poison}{anomaly}"
+            )
+
+    except Exception as e:
+        console.print(f"ERROR [red]{e}[/red]")
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def benchmark(
+    run_dir_path: str | None = typer.Argument(
+        None, help="Path to run directory (optional; defaults to synthetic corpora)"
+    ),
+    adversarial: bool = typer.Option(
+        True, "--adversarial/--no-adversarial", help="Also run the paraphrase-hard corpus"
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON only"),
+) -> None:
+    """Measure detection quality (precision/recall/F1) against ground truth.
+
+    With a run directory, detectors are measured on the stored cases using the
+    metadata embedded by the mutators. Without one, the deterministic
+    synthetic and adversarial corpora provide an offline reference bench that
+    is reproducible in CI. Every prediction is produced by the shipped
+    detector functions, never by reading stored score labels.
+    """
+    try:
+        import json
+
+        from ragfuzz.reports import load_run_payload
+        from ragfuzz.scoring.benchmark import (
+            adversarial_corpus,
+            detection_metrics,
+            synthetic_corpus,
+        )
+
+        try:
+            if run_dir_path is not None:
+                _run_data, cases = load_run_payload(run_dir_path)
+            else:
+                cases = synthetic_corpus()
+        except Exception:
+            cases = synthetic_corpus()
+
+        metrics = detection_metrics(cases)
+
+        if adversarial and not run_dir_path:
+            hard_cases = adversarial_corpus()
+            hard_metrics = detection_metrics(hard_cases)
+            metrics["adversarial_corpus"] = hard_metrics
+            metrics["summary"]["adversarial_membership_f1"] = hard_metrics[
+                "summary"
+            ]["membership_f1"]
+
+        if json_out:
+            typer.echo(json.dumps(metrics, sort_keys=True))
+            return
+
+        if run_dir_path:
+            console.print(f"Benchmark over: [bold]{run_dir_path}[/bold] "
+                          f"({len(cases)} cases)")
+        else:
+            console.print(f"Synthetic reference corpus: [bold]{len(cases)} cases[/bold]")
+
+        summary = metrics["summary"]
+        console.print("\nDetection quality (F1 / precision / recall):")
+        console.print(
+            f"  Hub anomalies:    {summary['hub_f1']:.3f} "
+            f"({metrics['hub_detection']['precision']:.3f} / "
+            f"{metrics['hub_detection']['recall']:.3f})"
+        )
+        console.print(
+            f"  Poison influence: {summary['poison_f1']:.3f} "
+            f"({metrics['poison_influence']['precision']:.3f} / "
+            f"{metrics['poison_influence']['recall']:.3f})"
+        )
+        console.print(
+            f"  Canary leak:      {summary['leak_f1']:.3f} "
+            f"({metrics['leak_detection']['precision']:.3f} / "
+            f"{metrics['leak_detection']['recall']:.3f})"
+        )
+        console.print(
+            f"  Membership:       {summary['membership_f1']:.3f} "
+            f"({metrics['membership_detection']['precision']:.3f} / "
+            f"{metrics['membership_detection']['recall']:.3f})"
+        )
+        console.print(f"\n  Macro F1: {summary['macro_f1']:.3f}")
+        if "adversarial_corpus" in metrics:
+            console.print(
+                f"  Adversarial membership F1: "
+                f"{metrics['summary']['adversarial_membership_f1']:.3f}"
+            )
+
+    except Exception as e:
+        console.print(f"ERROR [red]{e}[/red]")
+        raise typer.Exit(1) from e
+
+
+@app.command()
 def bisect(
     run1: str = typer.Argument(..., help="Path to first run directory"),
     run2: str = typer.Argument(..., help="Path to second run directory"),
@@ -1207,6 +1388,15 @@ def _write_audit_event(
         return
 
 
+def _sha256_of(path: Path) -> str:
+    """Compute the SHA-256 digest of a file for the evidence manifest."""
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(65536), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 async def _build_evidence_bundle(
     *,
     run_dir_path: Path | None,
@@ -1223,7 +1413,9 @@ async def _build_evidence_bundle(
     )
     readiness_path = output_dir / "readiness.json"
     readiness_path.write_text(json.dumps(readiness_report, indent=2, sort_keys=True))
-    artifacts.append({"name": "readiness", "path": str(readiness_path)})
+    artifacts.append(
+        {"name": "readiness", "path": str(readiness_path), "sha256": _sha256_of(readiness_path)}
+    )
 
     if run_dir_path:
         if not run_dir_path.exists():
@@ -1236,7 +1428,13 @@ async def _build_evidence_bundle(
 
         summary_path = output_dir / "report-summary.json"
         summary_path.write_text(json.dumps(report_summary, indent=2, sort_keys=True))
-        artifacts.append({"name": "report-summary", "path": str(summary_path)})
+        artifacts.append(
+            {
+                "name": "report-summary",
+                "path": str(summary_path),
+                "sha256": _sha256_of(summary_path),
+            }
+        )
 
         copied_html = output_dir / "report.html"
         copied_md = output_dir / "report.md"
@@ -1244,8 +1442,16 @@ async def _build_evidence_bundle(
         shutil.copy2(report_md, copied_md)
         artifacts.extend(
             [
-                {"name": "report-html", "path": str(copied_html)},
-                {"name": "report-markdown", "path": str(copied_md)},
+                {
+                    "name": "report-html",
+                    "path": str(copied_html),
+                    "sha256": _sha256_of(copied_html),
+                },
+                {
+                    "name": "report-markdown",
+                    "path": str(copied_md),
+                    "sha256": _sha256_of(copied_md),
+                },
             ]
         )
 
@@ -1257,7 +1463,13 @@ async def _build_evidence_bundle(
         "findings": redaction_findings,
     }
     redaction_path.write_text(json.dumps(redaction_payload, indent=2, sort_keys=True))
-    artifacts.append({"name": "redact-check", "path": str(redaction_path)})
+    artifacts.append(
+        {
+            "name": "redact-check",
+            "path": str(redaction_path),
+            "sha256": _sha256_of(redaction_path),
+        }
+    )
 
     manifest = {
         "status": "ready" if not redaction_findings else "needs_review",
@@ -1739,11 +1951,48 @@ async def _resolve_provider_model(
     return _select_chat_model(provider_id, configured_model, models)
 
 
-def _setup_scorer(scoring_mode: str | None, provider: OpenAICompatProvider) -> Scorer:
-    """Create the scorer requested by the suite or CLI."""
+def _setup_scorer(
+    scoring_mode: str | None,
+    provider: OpenAICompatProvider,
+    suite_config: SuiteConfig | None = None,
+    semantic_backends: bool = False,
+    embedding_model: str | None = None,
+) -> Scorer:
+    """Create the scorer requested by the suite or CLI.
+
+    Args:
+        scoring_mode: Scoring mode name (heuristic or judge).
+        provider: Provider instance for judge evaluations.
+        suite_config: Optional suite whose ``scoring.heuristics`` gate the
+            heuristic set that is computed.
+        semantic_backends: When true, upgrade the heuristic scorer's lexical
+            entailment and membership overlap checks with provider-backed NLI
+            and embedding scoring.
+        embedding_model: Optional explicit model for the membership embedding
+            backend; defaults to the provider's resolved model.
+
+    Returns:
+        A configured Scorer.
+    """
     mode = scoring_mode or "heuristic"
     if mode == "heuristic":
-        return HeuristicScorer()
+        heuristic_names: list[str] = []
+        if suite_config is not None:
+            scoring_section = suite_config.scoring or {}
+            heuristic_names = scoring_section.get("heuristics") or []
+        config: dict[str, Any] = {"heuristics": heuristic_names}
+        if semantic_backends:
+            from ragfuzz.scoring.semantic import (
+                ProviderMembershipEmbedder,
+                ProviderNLI,
+            )
+
+            nli_model = embedding_model or provider.default_model
+            config["entailment"] = ProviderNLI(provider=provider, model=nli_model)
+            config["membership_embedder"] = ProviderMembershipEmbedder(
+                provider=provider, model=embedding_model
+            )
+        return HeuristicScorer(config=config)
     if mode == "judge":
         return JudgeScorer(judge_provider=provider)
     raise ValueError("scoring mode must be heuristic or judge")
@@ -1754,6 +2003,7 @@ def _setup_mutators(
     provider: OpenAICompatProvider,
     poison_mode: str | None = None,
     run_id: str = "",
+    seed: int | None = None,
 ) -> list[Mutator]:
     """Setup mutators from suite configuration.
 
@@ -1762,6 +2012,7 @@ def _setup_mutators(
         provider: Provider instance for LLM-guided mutator.
         poison_mode: Optional poison mode (influence, exfil, bias).
         run_id: Run ID for tagging poisoned chunks.
+        seed: Optional random seed for determinism.
 
     Returns:
         List of configured mutators.
@@ -1798,7 +2049,9 @@ def _setup_mutators(
         elif mutator_type == "stateful_dialogue":
             config = mutator_spec.get("config", {})
             mutators.append(
-                StatefulDialogueMutator(name="stateful_dialogue", config=config, provider=provider)
+                StatefulDialogueMutator(
+                    name="stateful_dialogue", config=config, provider=provider, seed=seed
+                )
             )
 
         elif mutator_type == "poison":

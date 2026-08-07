@@ -61,6 +61,25 @@ class Provider:
         """
         raise NotImplementedError
 
+    async def embed(
+        self,
+        texts: list[str],
+        model: str,
+    ) -> list[list[float]]:
+        """Embed a list of texts.
+
+        Args:
+            texts: Texts to embed.
+            model: Embedding model identifier.
+
+        Returns:
+            List of embedding vectors.
+
+        Raises:
+            NotImplementedError: If not implemented by subclass.
+        """
+        raise NotImplementedError
+
     async def health_check(self) -> bool:
         """Check if the provider is accessible.
 

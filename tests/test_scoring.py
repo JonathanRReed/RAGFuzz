@@ -99,3 +99,110 @@ class TestHeuristicScorer:
         assert scores.policy_violation_score == 0.0
         assert scores.partial_success_score == 0.0
         assert scores.tool_error_rate == 0.0
+
+
+class _FakeEntailmentBackend:
+    _STOPWORDS = {
+        "the", "a", "an", "and", "or", "of", "in", "on", "to", "for",
+        "was", "is", "were", "be", "with", "at", "this", "that", "it",
+    }
+
+    def __init__(self, entail_score: float) -> None:
+        self._score = entail_score
+
+    async def score(self, claim: str, evidence: str) -> float:
+        claim_tokens = {
+            token
+            for token in claim.lower().split()
+            if token not in self._STOPWORDS
+        }
+        evidence_tokens = {
+            token
+            for token in evidence.lower().split()
+            if token not in self._STOPWORDS
+        }
+        if not claim_tokens & evidence_tokens:
+            return 0.0
+        return self._score
+
+
+class _FakeMembershipEmbedder:
+    async def score(self, candidate: str, text: str) -> float:
+        return 0.9 if candidate in text else 0.1
+
+
+class TestHeuristicScorerSemanticBackends:
+    @pytest.mark.asyncio
+    async def test_nli_backend_upgrades_claim_groundedness(self) -> None:
+        config = {
+            "heuristics": ["claim_groundedness"],
+            "entailment": _FakeEntailmentBackend(0.9),
+        }
+        scorer = HeuristicScorer(config=config)
+        response = Response(
+            content="The policy predicts claim risk for flagged accounts.",
+            model="test",
+            metadata={
+                "retrieval": {
+                    "chunks": [
+                        {"text": "flagged accounts get risk scores with the model policy"},
+                        {"text": "unrelated content about refunds"},
+                    ]
+                }
+            },
+        )
+
+        scores = await scorer.score(response)
+
+        assert scores.claim_contradiction_rate == 0.0
+        assert scores.faithfulness_score == 0.0
+
+    @pytest.mark.asyncio
+    async def test_nli_backend_records_entailment_scores(self) -> None:
+        config = {
+            "heuristics": ["claim_groundedness"],
+            "entailment": _FakeEntailmentBackend(0.9),
+        }
+        scorer = HeuristicScorer(config=config)
+        response = Response(
+            content="The whole framework was entirely abolished.",
+            model="test",
+            metadata={
+                "retrieval": {
+                    "chunks": [{"text": "nothing about the old policy here"}]
+                }
+            },
+        )
+
+        scores = await scorer.score(response)
+
+        assert scores.faithfulness_score == 1.0
+
+    @pytest.mark.asyncio
+    async def test_membership_embedder_used_for_canary(self) -> None:
+        config = {
+            "heuristics": ["membership"],
+            "membership_embedder": _FakeMembershipEmbedder(),
+        }
+        scorer = HeuristicScorer(config=config)
+        response = Response(content="the canary value ZXA-911 was echoed back", model="test")
+
+        scores = await scorer.score(response, {"canary": "ZXA-911"})
+
+        assert scores.membership_evidence_score == 0.9
+        assert scorer.last_membership == {
+            "evidence": 0.9,
+            "disclosed": True,
+            "backend": "embedding",
+        }
+
+    @pytest.mark.asyncio
+    async def test_lexical_membership_used_when_no_embedder(self) -> None:
+        scorer = HeuristicScorer(config={"heuristics": ["membership"]})
+        response = Response(content="echoing ZXA-911 for you", model="test")
+
+        scores = await scorer.score(response, {"canary": "ZXA-911"})
+
+        assert scores.membership_evidence_score > 0.5
+        assert scorer.last_membership is not None
+        assert "backend" not in scorer.last_membership
