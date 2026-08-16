@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "ragfuzz"
 version = "0.4.0"
-description = "Grey-box RAG Auditor and Prompt Fuzzer (local-first)"
+description = "Local-first security evaluation and replay workspace for chat and RAG systems"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "FSL-1.1-MIT" }
 authors = [
-    { name = "ragfuzz contributors" }
+    { name = "Jonathan R. Reed" }
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -31,6 +31,11 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn>=0.30.0",
 ]
+
+[project.urls]
+Homepage = "https://jonathanrreed.com/projects/ragfuzz/"
+Source = "https://github.com/JonathanRReed/RAGFuzz"
+Issues = "https://github.com/JonathanRReed/RAGFuzz/issues"
 
 [project.optional-dependencies]
 dev = [
