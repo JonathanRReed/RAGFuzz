@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use RAGFuzz in research, evaluation, or teaching, cite the exact version or commit you used."
+title: "RAGFuzz: A Local-First RAG Security Evaluation Workspace"
+type: software
+authors:
+  - family-names: Reed
+    given-names: "Jonathan R."
+repository-code: "https://github.com/JonathanRReed/RAGFuzz"
+url: "https://jonathanrreed.com/projects/ragfuzz/"
+version: 0.4.0
+license: FSL-1.1-MIT
+abstract: >-
+  RAGFuzz is a local-first workspace for testing chat and retrieval-augmented
+  generation systems against prompt injection, leakage, poisoning, retrieval
+  conflict, grounding failures, context flooding, and related security risks.
+  It records replayable cases and produces redacted HTML, Markdown, and JSON
+  evidence for authorized local evaluation.
+keywords:
+  - RAG security
+  - prompt injection
+  - retrieval-augmented generation
+  - LLM evaluation
+  - red teaming
