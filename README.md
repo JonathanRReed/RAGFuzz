@@ -1,30 +1,15 @@
 # RAGFuzz
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License: FSL-1.1-MIT](https://img.shields.io/badge/license-FSL--1.1--MIT-orange.svg)](./LICENSE)
+[![License: FSL-1.1-MIT](https://img.shields.io/badge/license-FSL--1.1--MIT-orange.svg)](LICENSE)
 
-RAGFuzz is a local-first RAG security evaluation workspace. It fuzzes chat and RAG systems, scores failures, records replayable evidence, and generates redacted reports for product, client, and recruiter demos.
+Test chat and retrieval-augmented generation systems for security failures. RAGFuzz runs adversarial suites, scores results, saves replayable cases, and exports redacted reports.
 
-The product supports local OpenAI-compatible providers first:
+The normal workflow uses a local OpenAI-compatible model server. No cloud provider account is required. Test only systems you own or have permission to assess.
 
-- Ollama at `http://localhost:11434/v1`
-- LM Studio at `http://localhost:1234/v1`
-- vLLM at `http://localhost:8000/v1`
+## Install and run
 
-Cloud provider setup is not required for the normal local workflow.
-
-## What It Does
-
-- Checks local provider readiness and available models.
-- Lets you choose the model under test.
-- Runs adversarial prompt and RAG security suites.
-- Supports leakage, prompt injection, jailbreak, poisoning, retrieval robustness, faithfulness, multi-turn, white DoS / context flood, soft-ad, and multi-hop run types.
-- Scores canary leaks, policy violations, partial success, refusal latency, tool errors, poison influence, source trust, retrieval rank drift, conflict recovery, citation grounding, multi-hop evidence loss, context-flood degradation, claim-level faithfulness, and corpus membership-inference evidence.
-- Stores normal CLI run artifacts under `runs/`.
-- Generates HTML, Markdown, and JSON report outputs with redaction.
-- Provides a FastAPI demo app with onboarding, live progress streaming, provider setup checks, model selection, and report drilldowns.
-
-## Install
+Requires Python 3.11+, uv, and a running model server.
 
 ```bash
 git clone https://github.com/JonathanRReed/RAGFuzz.git
@@ -32,78 +17,47 @@ cd RAGFuzz
 uv sync --all-extras --dev
 ```
 
-Requirements:
-
-- Python 3.11 or newer
-- uv
-- One local model server, usually Ollama, LM Studio, or vLLM
-
-## Quick Start With Ollama
-
-Start Ollama and make sure at least one chat model is installed.
-
-```bash
-ollama list
-```
-
-Create the local config.
+For Ollama, install a chat model and check that `ollama list` finds it. Then:
 
 ```bash
 uv run ragfuzz init
-```
-
-The default config uses Ollama and `default_model = "auto"`, so RAGFuzz selects the first non-embedding model returned by the provider.
-
-Verify the provider.
-
-```bash
 uv run ragfuzz providers-doctor --provider ollama
 uv run ragfuzz models-ls --provider ollama
-```
-
-Run a real one-case smoke test.
-
-```bash
 uv run ragfuzz run suites/rag-canary-leak.yaml --provider ollama --runs 1 --concurrency 1 --json-summary
 ```
 
-Generate reports for the run directory printed by the command.
+The generated configuration selects the first non-embedding model when `default_model = "auto"`. Set an exact model ID when the comparison requires a fixed model.
+
+CLI runs save artifacts under `runs/`. Use the run and case IDs printed by the command:
 
 ```bash
 uv run ragfuzz report runs/YOUR_RUN_ID --html --md --json
-```
-
-Replay a saved failure case.
-
-```bash
 uv run ragfuzz replay runs/YOUR_RUN_ID/failures/CASE_ID.json --provider ollama
 ```
 
-## Demo App
+The one-case command is also suitable for a small CI smoke test. It is not a full security assessment.
 
-Launch the local product demo.
+## Local demo
 
 ```bash
 uv run ragfuzz demo
 ```
 
-Open `http://127.0.0.1:8765` if the browser does not open automatically.
+Open `http://127.0.0.1:8765`. The FastAPI app checks providers, lists models, runs walkthroughs with live progress, and displays reports. Scenario controls can inject findings for demonstration; distinguish those from measured failures.
 
-The demo is intentionally ephemeral. Demo state is stored in memory and clears when the app closes. Normal CLI commands still write durable artifacts under `runs/`.
+Demo state lives in memory and clears on exit. Normal CLI artifacts remain on disk.
 
-The demo screen shows:
+## Providers and budgets
 
-- Real local provider checks for Ollama, LM Studio, and vLLM.
-- All currently available models for active providers.
-- A model selector that controls the active demo run model.
-- A walkthrough explaining provider connection, model selection, fuzz execution, scoring, and reports.
-- Demo controls for scenario, case count, and injected findings so a walkthrough can show different outcomes.
-- A live stream panel with provider sample output, case ids, findings, and scores.
-- Recent demo reports in JSON, styled HTML, formatted Markdown preview, and raw Markdown.
+| Provider | Default URL | Key setting |
+| --- | --- | --- |
+| Ollama | `http://localhost:11434/v1` | `OLLAMA_API_KEY` |
+| LM Studio | `http://localhost:1234/v1` | `LM_STUDIO_API_KEY` |
+| vLLM | `http://localhost:8000/v1` | `VLLM_API_KEY` |
 
-## Local Provider Setup
+Normal local Ollama and LM Studio servers need no key. vLLM needs one only when configured to require it. In LM Studio, load a model and start the server. A vLLM example is `vllm serve MODEL_NAME --host 127.0.0.1 --port 8000`.
 
-### Ollama
+Provider entries use this structure, substituting the name, URL, and key variable from the table:
 
 ```toml
 [providers.ollama]
@@ -113,45 +67,7 @@ api_key_env = "OLLAMA_API_KEY"
 default_model = "auto"
 ```
 
-Ollama does not need an API key for the normal local server.
-
-### LM Studio
-
-Enable the local OpenAI-compatible server in LM Studio, then use:
-
-```toml
-[providers.lmstudio]
-type = "openai_compat"
-base_url = "http://localhost:1234/v1"
-api_key_env = "LM_STUDIO_API_KEY"
-default_model = "auto"
-```
-
-LM Studio does not need an API key for the normal local server.
-
-### vLLM
-
-Start vLLM with an OpenAI-compatible server.
-
-```bash
-vllm serve MODEL_NAME --host 127.0.0.1 --port 8000
-```
-
-Then use:
-
-```toml
-[providers.vllm]
-type = "openai_compat"
-base_url = "http://localhost:8000/v1"
-api_key_env = "VLLM_API_KEY"
-default_model = "auto"
-```
-
-Local vLLM does not need an API key unless you start it with one.
-
-## Configuration
-
-The default generated `ragfuzz.toml` is local-first.
+Generated budget defaults:
 
 ```toml
 [budget]
@@ -162,18 +78,9 @@ default_provider = "ollama"
 default_target = "chat"
 ```
 
-Use a specific installed model when you need deterministic model selection.
+## Suites and scoring
 
-```toml
-[providers.ollama]
-default_model = "gemma4:e2b"
-```
-
-Use `auto` when the machine may have different local models installed.
-
-## Suites
-
-Suites are YAML files that define the run type, seeds, mutation strategy, canary, scoring, and budget.
+YAML suites define seeds, mutations, canaries, scoring, and budgets. Example:
 
 ```yaml
 name: rag-canary-leak
@@ -195,40 +102,50 @@ budget:
   max_cost_usd: 5
 ```
 
-Supported run types:
+Run types are `retrieval`, `faithfulness`, `poisoning`, `prompt-injection`, `jailbreak`, `leakage`, `multi-turn`, `dos`, `soft-ad`, `multi-hop`, `membership-inference`, and `prompt-leak`.
 
-- `retrieval`
-- `faithfulness`
-- `poisoning`
-- `prompt-injection`
-- `jailbreak`
-- `leakage`
-- `multi-turn`
-- `dos` (white denial-of-service / context flood)
-- `soft-ad` (attacker text mixed into retrieval context)
-- `multi-hop` (evidence-chain degradation)
-- `membership-inference` (corpus membership / MEntA-style disclosure)
-- `prompt-leak` (system-prompt and context extraction via retrieval)
+| Starter suite under `suites/` | Tests |
+| --- | --- |
+| `rag-canary-leak.yaml` | Canary leakage and vector weaknesses |
+| `rag-indirect-prompt-injection.yaml` | Instructions in untrusted retrieved content |
+| `rag-retrieval-conflict.yaml` | Noisy, stale, or conflicting retrieval |
+| `rag-poisoned-knowledge.yaml` | Poisoned knowledge and source-trust effects |
+| `rag-dos-flood.yaml` | Context flooding and noise degradation |
+| `rag-multi-hop.yaml` | Evidence loss across retrieval steps |
+| `rag-claim-grounded.yaml` | Claim grounding, chunk use, and contradictions |
+| `rag-membership-inference.yaml` | Disclosure of corpus membership |
+| `rag-prompt-leak.yaml` | System-prompt and instruction extraction |
+| `rag-hub-detection.yaml` | Adversarial hubness in retrieval snapshots |
 
-Included research-backed starter suites:
+Only declared scoring heuristics run. Unknown names fail validation. Signals include canary leaks, policy violations, partial success, refusal latency, tool errors, poison influence, source trust, rank drift, conflict recovery, grounding, context degradation, and membership evidence. Declare only what the suite actually measures.
 
-- `suites/rag-canary-leak.yaml`, canary leakage and vector weakness checks.
-- `suites/rag-indirect-prompt-injection.yaml`, indirect prompt injection from untrusted retrieved content.
-- `suites/rag-retrieval-conflict.yaml`, SafeRAG and RARE-style noisy retrieval, stale context, and inter-context conflict checks.
-- `suites/rag-poisoned-knowledge.yaml`, poisoned knowledge and source-trust influence checks.
-- `suites/rag-dos-flood.yaml`, SafeRAG white-DoS context flooding and silver-noise degradation checks.
-- `suites/rag-multi-hop.yaml`, RARE multi-hop evidence-loss and ungrounded-hallucination checks.
-- `suites/rag-claim-grounded.yaml`, claim-level faithfulness: per-claim grounding, chunk usage, and contradiction scans over unused context.
-- `suites/rag-membership-inference.yaml`, black-box corpus membership probes with member/non-member separation (MEntA/E-MIA style).
-- `suites/rag-prompt-leak.yaml`, system-prompt and instruction extraction probes (OWASP LLM08).
-- `suites/rag-hub-detection.yaml`, adversarial-hubness detection over grey-box retrieval snapshots (Cisco arXiv:2502.08384).
+## Target safety and handoff
 
-Scoring heuristics listed under `scoring.heuristics` are validated against a
-registry (unknown names fail fast) and gate which signals are computed per case;
-declare only what your suite measures. New in 0.4.0: `prompt_leak` and `hubness`
-join `claim_groundedness`, `membership`, and the rest.
+Record authorization before running a suite. Public and link-local targets are blocked by default; JR AutoRAG checks and poison runs default to loopback or private hosts.
 
-## CLI Reference
+```bash
+uv run ragfuzz target-check http://127.0.0.1:8000
+uv run ragfuzz target-check https://rag.internal.example --allowed-host '*.internal.example'
+uv run ragfuzz doctor
+```
+
+`--allow-public-target` deliberately widens that boundary. Use it only for an authorized target. Local HTTP traffic ignores proxy environment variables by default; set `RAGFUZZ_HTTP_TRUST_ENV=true` only when the network requires proxy-aware checks.
+
+After a run:
+
+```bash
+uv run ragfuzz readiness --evidence-dir evidence
+uv run ragfuzz evidence-bundle --run-dir runs/YOUR_RUN_ID --output-dir evidence
+uv run ragfuzz redact-check evidence
+```
+
+Reports contain summary metrics, failures, cases, scores, mutations, and traces in HTML, Markdown, and JSON. Export redacts user-controlled headers and API-key-like values. The evidence bundle adds readiness records, redaction proof, and a manifest.
+
+Local audit events record timestamp, username when available, command, target or run ID, report outputs, and poison-cleanup status. Sensitive values are redacted before writing. Review exports before sharing them.
+
+[Security](SECURITY.md) · [Demo script](docs/enterprise/interview-demo-script.md) · [Client handoff](docs/enterprise/client-install-handoff.md)
+
+## CLI reference
 
 ```bash
 uv run ragfuzz init [CONFIG_PATH]
@@ -255,136 +172,7 @@ uv run ragfuzz bisect RUN_A RUN_B
 uv run ragfuzz viz CASE_JSON [--format ascii|mermaid] [--output PATH]
 ```
 
-## Reports
-
-Run reports include:
-
-- Summary metrics.
-- Failure counts and success rate.
-- Case explorer data.
-- Score breakdowns.
-- Mutation and trace metadata.
-- Redacted user-controlled headers and API-key-like values.
-- HTML, Markdown, and JSON outputs for local review or CI comments.
-
-For local-first safety, JR AutoRAG target checks and poison-mode runs default to loopback or private target hosts. Use `--allow-public-target` only when you intentionally want to contact a public or link-local target. Proxy environment variables are ignored by default for local HTTP traffic. Set `RAGFUZZ_HTTP_TRUST_ENV=true` when a corporate network requires proxy-aware provider checks.
-
-## Local Enterprise Operator Mode
-
-RAGFuzz is designed as a local enterprise utility for IT and security operators. It does not require hosted auth, SaaS tenancy, or cloud storage.
-
-Before testing a target, record authorization and validate the URL policy.
-
-```bash
-uv run ragfuzz target-check http://127.0.0.1:8000
-uv run ragfuzz target-check https://rag.internal.example --allowed-host '*.internal.example'
-```
-
-Public and link-local hosts are blocked unless the operator passes `--allow-public-target`.
-
-Run the local health gate.
-
-```bash
-uv run ragfuzz doctor
-```
-
-Build a handoff bundle after a run.
-
-```bash
-uv run ragfuzz evidence-bundle --run-dir runs/YOUR_RUN_ID --output-dir evidence
-uv run ragfuzz redact-check evidence
-```
-
-The bundle contains readiness evidence, report summaries, HTML and Markdown reports, a redaction proof, and `manifest.json`.
-
-Operator actions append JSONL events to the local audit log under the configured cache directory. The log records timestamp, local username when available, command action, target URL or run id when applicable, report outputs, and poison cleanup status. Sensitive values are redacted before writing.
-
-## Interview And Client Handoff
-
-Generate a readiness evidence bundle before showing the project.
-
-```bash
-uv run ragfuzz doctor
-uv run ragfuzz readiness --evidence-dir evidence
-uv run ragfuzz evidence-bundle --run-dir runs/YOUR_RUN_ID --output-dir evidence
-```
-
-Useful handoff documents:
-
-- [SECURITY.md](SECURITY.md)
-- [docs/enterprise/interview-demo-script.md](docs/enterprise/interview-demo-script.md)
-- [docs/enterprise/client-install-handoff.md](docs/enterprise/client-install-handoff.md)
-
-## CI Smoke Test
-
-Use a small run count for pull requests.
-
-```bash
-uv run ragfuzz providers-doctor --provider ollama
-uv run ragfuzz run suites/rag-canary-leak.yaml --provider ollama --runs 1 --concurrency 1 --json-summary
-```
-
-The JSON summary is stable enough for CI parsing and baseline comparison.
-
-## Research Anchors
-
-RAGFuzz is shaped by current RAG evaluation and LLM security work:
-
-- [SafeRAG](https://arxiv.org/abs/2501.18636)
-- [RARE](https://arxiv.org/abs/2506.00789)
-- [Ragas](https://arxiv.org/abs/2309.15217)
-- [AgentDojo](https://arxiv.org/abs/2406.13352)
-- [ASB](https://arxiv.org/abs/2410.02644)
-- [OWASP LLM08](https://genai.owasp.org/llmrisk/llm082025-vector-and-embedding-weaknesses/)
-- [promptfoo](https://github.com/promptfoo/promptfoo)
-- [PyRIT](https://github.com/microsoft/PyRIT)
-- [garak](https://github.com/NVIDIA/garak)
-- [DeepEval](https://github.com/confident-ai/deepeval)
-
-For the current research and peer-tool upgrade map, see
-[docs/research/ragfuzz-research-and-peer-audit-2026-05-12.md](docs/research/ragfuzz-research-and-peer-audit-2026-05-12.md).
-
-For the 2026-08 research round that shipped retrieval-conditioned scoring, see
-[docs/research/ragfuzz-research-round-2026-08-06.md](docs/research/ragfuzz-research-round-2026-08-06.md).
-
-For production-readiness checks and remaining risks, see
-[docs/audits/production-readiness-2026-08-06.md](docs/audits/production-readiness-2026-08-06.md).
-
-## Troubleshooting
-
-Provider is offline:
-
-```bash
-uv run ragfuzz providers-doctor --provider ollama
-```
-
-No models appear:
-
-```bash
-uv run ragfuzz models-ls --provider ollama
-```
-
-LM Studio is not ready:
-
-- Open LM Studio.
-- Load a model.
-- Start the local server.
-- Confirm the server URL is `http://localhost:1234/v1`.
-
-Ollama is not ready:
-
-```bash
-ollama list
-ollama serve
-```
-
-vLLM is not ready:
-
-- Confirm the server is running on port `8000`.
-- Confirm `/v1/models` responds.
-- Set `default_model = "auto"` or use the exact model id returned by vLLM.
-
-## Development Checks
+## Development and research
 
 ```bash
 python -m compileall -q ragfuzz tests
@@ -392,3 +180,11 @@ ruff check ragfuzz tests
 mypy ragfuzz
 pytest tests -q
 ```
+
+Research and peer-tool references, including SafeRAG, RARE, Ragas, AgentDojo, ASB, OWASP, promptfoo, PyRIT, garak, and DeepEval, are collected in the [May research audit](docs/research/ragfuzz-research-and-peer-audit-2026-05-12.md). The [August research round](docs/research/ragfuzz-research-round-2026-08-06.md) covers retrieval-conditioned scoring.
+
+Check [production readiness and remaining risks](docs/audits/production-readiness-2026-08-06.md) before making release claims.
+
+## License
+
+[Functional Source License 1.1, MIT Future License](LICENSE).
