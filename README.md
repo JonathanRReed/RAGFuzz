@@ -7,6 +7,8 @@ Test chat and retrieval-augmented generation systems for security failures. RAGF
 
 The normal workflow uses a local OpenAI-compatible model server. No cloud provider account is required. Test only systems you own or have permission to assess.
 
+[How RAGFuzz keeps prompt-injection tests replayable](https://helloworldfirm.com/case-studies/ragfuzz/) covers the test cases, replay records, and evidence limits.
+
 ## Install and run
 
 Requires Python 3.11+, uv, and a running model server.
