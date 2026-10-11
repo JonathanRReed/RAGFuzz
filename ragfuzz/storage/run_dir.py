@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ragfuzz.config import Config
+from ragfuzz.constants import SCORE_SCHEMA_VERSION
 
 
 class RunDir:
@@ -61,7 +62,7 @@ class RunDir:
             suite_config: Suite configuration.
             extra: Extra metadata.
         """
-        extra = extra or {}
+        extra = {"score_schema_version": SCORE_SCHEMA_VERSION, **(extra or {})}
 
         run_config = {
             "run_id": self.run_id,

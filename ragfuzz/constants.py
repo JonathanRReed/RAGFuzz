@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+SCORE_SCHEMA_VERSION = 2
+
 # Default scheduler settings
 DEFAULT_MAX_RUNS = 1000
 DEFAULT_CONCURRENCY = 4

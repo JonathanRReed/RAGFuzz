@@ -38,6 +38,7 @@ from ragfuzz.reports.viz import MutationGraphViz
 from ragfuzz.scoring import HeuristicScorer
 from ragfuzz.scoring.base import Scorer
 from ragfuzz.scoring.judge import JudgeScorer
+from ragfuzz.scoring.outcomes import is_failure
 from ragfuzz.storage import RunDir
 from ragfuzz.storage.baseline import BaselineManager
 from ragfuzz.targets import ChatTarget
@@ -569,9 +570,10 @@ def baseline_check(
 
         result = baseline_manager.compare_against_baseline(suite, cases)
 
-        if result["status"] == "no_baseline":
+        if result["status"] in {"no_baseline", "needs_rerun"}:
             console.print(f"WARN {result['message']}")
-            console.print("Run [bold]ragfuzz baseline-save[/bold] to create a baseline.")
+            if result["status"] == "no_baseline":
+                console.print("Run [bold]ragfuzz baseline-save[/bold] to create a baseline.")
             return
 
         console.print(f"Baseline check for: [bold]{suite}[/bold]")
@@ -835,6 +837,9 @@ def run(
                     run_type=suite_config.run_type,
                     suite_context={
                         "canary": suite_config.canary.get("value"),
+                        "system_prompt": suite_config.canary.get("value")
+                        if suite_config.run_type == "prompt-leak"
+                        else None,
                         "run_type": suite_config.run_type,
                         "owasp": suite_config.owasp,
                         "research": suite_config.research,
@@ -846,14 +851,8 @@ def run(
                 for case in cases:
                     run_dir.write_case(case.model_dump())
 
-                    if case.scores.leak_score > 0.5 or case.scores.policy_violation_score > 0.5:
+                    if is_failure(case.scores.model_dump()):
                         run_dir.write_failure(case.case_id, case.model_dump())
-                    else:
-                        from ragfuzz.scoring.rag_metrics import rag_risk_vector
-
-                        case_vector = rag_risk_vector(case.scores.model_dump())
-                        if float(case_vector["rag_risk"]) > 0.5:
-                            run_dir.write_failure(case.case_id, case.model_dump())
 
                     if (len(cases) - len([c for c in cases if c is None])) % 10 == 0:
                         completed = len([c for c in cases if c is not None])
@@ -866,6 +865,12 @@ def run(
             console.print(f"Results: {run_dir.path}")
             console.print("\nScheduler Stats:")
             console.print(f"  Runs completed: {stats['run_count']}")
+            if stats["cache_hits"]:
+                console.print(
+                    f"WARN {stats['cache_hits']} cached requests skipped; "
+                    f"{stats['attempt_count']} attempts consumed the run budget. "
+                    "Only fresh target responses were scored."
+                )
             console.print(f"  Total cost: ${stats.get('total_cost_usd', 0):.2f}")
             console.print(f"  Corpus size: {stats['corpus']['total_entries']}")
             console.print(f"  Unique failures: {stats['corpus']['unique_failures']}")
@@ -882,6 +887,7 @@ def run(
             console.print(f"\nReport: [bold]{report_path}[/bold]")
 
             if json_summary:
+                report_summary = reporter.summarize(run_dir.path)["summary"]
                 summary = {
                     "run_id": run_dir.run_id,
                     "run_dir": str(run_dir.path),
@@ -893,6 +899,10 @@ def run(
                     "target_id": target_instance.target_id,
                     "provider_id": provider_id,
                     "runs_completed": stats["run_count"],
+                    "attempts_completed": stats["attempt_count"],
+                    "cache_hits": stats["cache_hits"],
+                    "evaluation_status": report_summary["evaluation_status"],
+                    "success_rate": report_summary["success_rate"],
                     "unique_failures": stats["corpus"]["unique_failures"],
                     "total_cost_usd": round(stats.get("total_cost_usd", 0), 6),
                 }
@@ -1128,7 +1138,7 @@ def corpus_stats(
                 input_text=input_text,
                 scores=scores,
                 failure_signature=failure_sig
-                if scores.leak_score > 0.5 or scores.policy_violation_score > 0.5
+                if is_failure(scores.model_dump())
                 else None,
             )
             corpus.add_entry(entry)

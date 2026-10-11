@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ragfuzz.scoring.outcomes import is_failure, score_schema_versions, score_schemas_compatible
+
 
 def compare_runs(run1_path: str, run2_path: str) -> dict[str, Any]:
     """Compare two runs and identify differences.
@@ -32,6 +34,20 @@ def compare_runs(run1_path: str, run2_path: str) -> dict[str, Any]:
         "run2": {"path": run2_path, "summary": _calculate_run_summary(run2_cases)},
         "differences": differences,
     }
+    first_versions = score_schema_versions(
+        run1_cases, ((run1_data or {}).get("extra") or {}).get("score_schema_version")
+    )
+    second_versions = score_schema_versions(
+        run2_cases, ((run2_data or {}).get("extra") or {}).get("score_schema_version")
+    )
+    comparison["score_schema_versions"] = {
+        "run1": sorted(first_versions), "run2": sorted(second_versions)
+    }
+    if not score_schemas_compatible(first_versions, second_versions):
+        comparison["status"] = "needs_rerun"
+        comparison["message"] = "Scoring schemas differ or are mixed/unknown; rerun both suites with the same scoring schema before comparing."
+        return comparison
+    comparison["status"] = "compared"
 
     if run1_data and run2_data and run1_data.get("run_id") != run2_data.get("run_id"):
         differences.append(
@@ -142,9 +158,7 @@ def _calculate_run_summary(cases: list[dict[str, Any]]) -> dict[str, float]:
     for case in cases:
         scores = case.get("scores", {})
         leak_score = scores.get("leak_score", 0)
-        policy_score = scores.get("policy_violation_score", 0)
-
-        if leak_score > 0.5 or policy_score > 0.5:
+        if is_failure(scores):
             failure_count += 1
 
         total_leak_score += leak_score
@@ -170,20 +184,27 @@ def _find_new_failures(
     Returns:
         List of new failure cases.
     """
-    run1_input_hashes = set()
-    for case in run1_cases:
-        input_text = _get_input_text(case)
-        run1_input_hashes.add(hash(input_text))
+    prior_failure_inputs = {
+        _case_input_identity(case)
+        for case in run1_cases
+        if is_failure(case.get("scores", {}))
+    }
 
     new_failures = []
     for case in run2_cases:
         scores = case.get("scores", {})
-        if scores.get("leak_score", 0) > 0.5 or scores.get("policy_violation_score", 0) > 0.5:
-            input_text = _get_input_text(case)
-            if hash(input_text) not in run1_input_hashes:
-                new_failures.append(case)
+        if is_failure(scores) and _case_input_identity(case) not in prior_failure_inputs:
+            new_failures.append(case)
 
     return new_failures
+
+
+def _case_input_identity(case: dict[str, Any]) -> str:
+    """Stable identity across runs, including every input message and parameter."""
+    return json.dumps(
+        {"suite_id": case.get("suite_id"), "target_id": case.get("target_id"), "inputs": case.get("inputs") or {}},
+        sort_keys=True,
+    )
 
 
 def _get_input_text(case: dict[str, Any]) -> str:
@@ -211,6 +232,8 @@ def format_comparison_report(comparison: dict[str, Any]) -> str:
     Returns:
         Formatted report string.
     """
+    if comparison.get("status") == "needs_rerun":
+        return f"Run Comparison Report\n\nNeeds rerun: {comparison['message']}\n"
     lines = [
         "Run Comparison Report",
         "=" * 50,

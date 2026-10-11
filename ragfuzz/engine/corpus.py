@@ -52,6 +52,7 @@ class Corpus:
             "faithfulness_score": 1.0,
             "retrieval_relevance_score": 1.0,
             "leakage_score": 2.0,
+            "prompt_leak_score": 2.0,
         }
 
         self.bias = bias
@@ -104,6 +105,7 @@ class Corpus:
             + scores.retrieval_relevance_score
             * self.weights.get("retrieval_relevance_score", 0)
             + scores.leakage_score * self.weights.get("leakage_score", 0)
+            + scores.prompt_leak_score * self.weights.get("prompt_leak_score", 0)
         )
 
         # Sigmoid function
@@ -207,11 +209,13 @@ class Corpus:
         violation_bin = self._bin_value(scores.policy_violation_score)
         partial_bin = self._bin_value(scores.partial_success_score)
         leakage_bin = self._bin_value(scores.leakage_score)
-
-        return (
+        score_bin = (
             f"leak:{leak_bin}|violation:{violation_bin}|partial:{partial_bin}|"
             f"leakage:{leakage_bin}"
         )
+        if scores.prompt_leak_score > 0.0:
+            score_bin += f"|prompt_leak:{self._bin_value(scores.prompt_leak_score)}"
+        return score_bin
 
     def _bin_value(self, value: float) -> str:
         """Bin a float value into categories.

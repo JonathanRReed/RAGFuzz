@@ -17,7 +17,9 @@ def _format_number(value: Any, digits: int = 3) -> str:
         return str(value)
 
 
-def _status_class(success_rate: float) -> str:
+def _status_class(success_rate: float | None) -> str:
+    if success_rate is None:
+        return "warn"
     if success_rate >= 90:
         return "good"
     if success_rate >= 75:
@@ -78,12 +80,12 @@ def _render_case_rows(cases: list[dict[str, Any]]) -> str:
     return "".join(rows)
 
 
-def _render_failure_cards(failures: list[dict[str, Any]]) -> str:
+def _render_failure_cards(failures: list[dict[str, Any]], *, evaluated: bool = True) -> str:
     if not failures:
         return (
             '<section class="panel panel-empty">'
             "<h2>Failures</h2>"
-            "<p class=\"panel-text\">No failures were detected in this run.</p>"
+            f"<p class=\"panel-text\">{'No failures were detected in this run.' if evaluated else 'No cases were evaluated; no security conclusion is available.'}</p>"
             "</section>"
         )
 
@@ -118,7 +120,9 @@ def render_html_report(report_data: dict[str, Any]) -> str:
     """Render a report bundle to polished, self-contained HTML."""
 
     summary = report_data.get("summary") or {}
-    success_rate = float(summary.get("success_rate", 0.0) or 0.0)
+    rate = summary.get("success_rate")
+    success_rate = float(rate) if rate is not None else None
+    rate_label = f"{success_rate:.1f}%" if success_rate is not None else "Not evaluated"
     suite_name = escape(str(report_data.get("suite_name", "unknown")))
     run_id = escape(str(report_data.get("run_id", "unknown")))
     timestamp = escape(str(report_data.get("timestamp", "unknown")))
@@ -128,7 +132,7 @@ def render_html_report(report_data: dict[str, Any]) -> str:
         ("Suite", suite_name),
         ("Total cases", str(summary.get("total_cases", 0))),
         ("Failures", str(summary.get("failure_count", 0))),
-        ("Success rate", f"{success_rate:.1f}%"),
+        ("Success rate", rate_label),
         ("Avg leak score", _format_number(summary.get("avg_leak_score"))),
         (
             "Avg policy score",
@@ -144,7 +148,9 @@ def render_html_report(report_data: dict[str, Any]) -> str:
     )
 
     metadata_html = _render_metadata_section(report_data.get("metadata") or {})
-    failures_html = _render_failure_cards(report_data.get("failures") or [])
+    failures_html = _render_failure_cards(
+        report_data.get("failures") or [], evaluated=success_rate is not None
+    )
     cases_rows = _render_case_rows(report_data.get("cases") or [])
     status_class = _status_class(success_rate)
 
@@ -435,7 +441,7 @@ def render_html_report(report_data: dict[str, Any]) -> str:
             <div class="eyebrow">ragfuzz report</div>
             <h1>{suite_name}</h1>
             <div class="subtitle">Run {run_id} completed at {timestamp}</div>
-            <div class="status-pill status-{status_class}"><span class="dot"></span><span>Success rate {success_rate:.1f}%</span></div>
+            <div class="status-pill status-{status_class}"><span class="dot"></span><span>Success rate {rate_label}</span></div>
         </section>
 
         <section class="stat-grid">

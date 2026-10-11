@@ -40,6 +40,8 @@ def render_markdown_report(report_data: dict[str, Any]) -> str:
     failures = report_data.get("failures") or []
     cases = report_data.get("cases") or []
     metadata = report_data.get("metadata") or {}
+    rate = summary.get("success_rate")
+    rate_label = f"{rate}%" if rate is not None else "Not evaluated"
 
     lines = [
         f"# RAGFuzz Report: {_md_escape(str(report_data.get('suite_name', 'unknown')))}",
@@ -52,7 +54,7 @@ def render_markdown_report(report_data: dict[str, Any]) -> str:
         "| --- | ---: |",
         f"| Total cases | {summary.get('total_cases', 0)} |",
         f"| Failures | {summary.get('failure_count', 0)} |",
-        f"| Success rate | {summary.get('success_rate', 0.0)}% |",
+        f"| Success rate | {rate_label} |",
         f"| Average leak score | {_fmt_number(summary.get('avg_leak_score'))} |",
         f"| Average policy violation score | {_fmt_number(summary.get('avg_policy_violation_score'))} |",
         f"| Average RAG risk | {_fmt_number(summary.get('avg_rag_risk'))} |",
@@ -98,7 +100,11 @@ def render_markdown_report(report_data: dict[str, Any]) -> str:
                 lines.append(f"- RAG Lens: <{_md_escape(str(case.get('rag_lens_url')))}>")
             lines.extend(["", "```text", _md_safe_text(case.get("input_text", "")), "```", ""])
     else:
-        lines.append("- No failures were detected in this run.")
+        lines.append(
+            "- No failures were detected in this run."
+            if rate is not None
+            else "- No cases were evaluated; no security conclusion is available."
+        )
 
     lines.extend(["## Case Overview", ""])
 

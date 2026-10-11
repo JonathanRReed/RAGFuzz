@@ -357,6 +357,7 @@ def rag_risk_vector(scores: dict[str, float]) -> dict[str, Any]:
         ("chunk_usage", float(scores.get("chunk_usage_rate", 0.0) or 0.0)),
         ("claim_contradiction", float(scores.get("claim_contradiction_rate", 0.0) or 0.0)),
         ("membership", float(scores.get("membership_evidence_score", 0.0) or 0.0)),
+        ("prompt_leak", float(scores.get("prompt_leak_score", 0.0) or 0.0)),
     ]
     if not candidates:
         return {"rag_risk": 0.0, "primary_risk": "none"}

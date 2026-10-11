@@ -48,7 +48,8 @@ class TestHeuristicScorer:
 
         scores = await scorer.score(response)
 
-        assert scores.policy_violation_score == 1.0
+        assert scores.refusal_score == 1.0
+        assert scores.policy_violation_score == 0.0
 
     @pytest.mark.asyncio
     async def test_score_no_refusal(self) -> None:

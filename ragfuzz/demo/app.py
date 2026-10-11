@@ -21,6 +21,7 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 
+from ragfuzz.constants import SCORE_SCHEMA_VERSION
 from ragfuzz.demo.state import DemoState, get_demo_scenario, get_demo_scenarios
 from ragfuzz.models import Message
 from ragfuzz.providers.openai_compat import OpenAICompatProvider
@@ -98,6 +99,8 @@ def _render_recent_run_rows(runs: list[dict[str, Any]]) -> str:
     rows: list[str] = []
     for run in runs:
         summary = run.get("summary") or {}
+        rate = summary.get("success_rate")
+        rate_label = f"{rate}%" if rate is not None else "Not evaluated"
         report_links = run.get("report_links") or {}
         rows.append(
             "<tr>"
@@ -106,7 +109,7 @@ def _render_recent_run_rows(runs: list[dict[str, Any]]) -> str:
             f"<td><span class=\"badge status-{_badge_class(str(run.get('status', 'unknown')))}\">{escape(str(run.get('status', 'unknown')))}</span></td>"
             f"<td>{int(run.get('progress', 0) or 0)}%</td>"
             f"<td>{int(summary.get('failure_count', 0) or 0)}</td>"
-            f"<td>{summary.get('success_rate', 0.0)}%</td>"
+            f"<td>{escape(rate_label)}</td>"
             f"<td class=\"table-actions\">"
             f"<a class=\"ghost-link\" href=\"{escape(str(report_links.get('json', '#')))}\">data</a>"
             f"<a class=\"ghost-link\" href=\"{escape(str(report_links.get('html', '#')))}\">html</a>"
@@ -681,6 +684,7 @@ def _build_demo_case(
 
     return {
         "case_id": f"{run_id}-live-{index + 1:02d}",
+        "score_schema_version": SCORE_SCHEMA_VERSION,
         "run_id": run_id,
         "suite_id": f"{run_id}-suite",
         "inputs": {
