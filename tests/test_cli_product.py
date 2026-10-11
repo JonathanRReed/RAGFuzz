@@ -8,6 +8,7 @@ from importlib import util as importlib_util
 from pathlib import Path
 
 import pytest
+from click import unstyle
 from typer.testing import CliRunner
 
 from ragfuzz import __version__
@@ -425,11 +426,20 @@ def test_setup_scorer_honors_suite_heuristics() -> None:
     assert scorer.enabled_heuristics == ["claim_groundedness", "canary_regex", "citation_grounding"]
 
 
-def test_run_command_exposes_seed_flag() -> None:
+@pytest.mark.parametrize("force_color", [False, True])
+def test_run_command_exposes_seed_flag(
+    monkeypatch: pytest.MonkeyPatch, force_color: bool
+) -> None:
+    from typer import rich_utils
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("TERM", raising=False)
+    monkeypatch.setattr(rich_utils, "FORCE_TERMINAL", force_color)
     runner = CliRunner()
     result = runner.invoke(app, ["run", "--help"])
     assert result.exit_code == 0
-    assert "--seed" in result.output
+    assert ("\x1b[" in result.output) is force_color
+    assert "--seed" in unstyle(result.output)
 
 
 def test_scheduler_config_accepts_seed() -> None:
