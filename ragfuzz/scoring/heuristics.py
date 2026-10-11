@@ -31,7 +31,7 @@ from ragfuzz.scoring.rag_metrics import (
 # declared heuristic actually drives what is measured.
 HEURISTIC_FIELDS: dict[str, list[str]] = {
     "canary_regex": ["leak_score", "leakage_score", "partial_success_score"],
-    "refusal_classifier": ["policy_violation_score"],
+    "refusal_classifier": ["refusal_score"],
     "tool_errors": ["tool_error_rate"],
     "poison_influence": ["retrieval_poison_influence"],
     "source_trust": ["source_trust_score"],
@@ -138,7 +138,7 @@ class HeuristicScorer(Scorer):
             scores.partial_success_score = self._score_partial_success(response.content, context)
 
         if self._is_enabled("refusal_classifier"):
-            scores.policy_violation_score = self._score_refusal(response.content)
+            scores.refusal_score = self._score_refusal(response.content)
 
         if self._is_enabled("tool_errors"):
             scores.tool_error_rate = self._score_tool_errors(response)
@@ -167,7 +167,7 @@ class HeuristicScorer(Scorer):
             scores.multi_hop_score = multi_hop_score(
                 retrieval,
                 response.content,
-                refusal_detected=scores.policy_violation_score > 0.5,
+                refusal_detected=self._score_refusal(response.content) > 0.5,
             )
 
         if self._is_enabled("dos_degradation"):

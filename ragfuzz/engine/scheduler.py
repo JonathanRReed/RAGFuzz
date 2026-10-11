@@ -6,12 +6,14 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
+from ragfuzz.constants import SCORE_SCHEMA_VERSION
 from ragfuzz.engine.cache import Cache
 from ragfuzz.engine.corpus import Corpus, CorpusEntry
 from ragfuzz.models import Case, ScoreVector
 from ragfuzz.mutators.base import Mutator
 from ragfuzz.mutators.graph import MutationGraph
 from ragfuzz.scoring.base import Scorer
+from ragfuzz.scoring.outcomes import is_failure
 from ragfuzz.targets.base import Target
 
 
@@ -54,6 +56,8 @@ class Scheduler:
         self.vram_monitor = vram_monitor
 
         self._run_count = 0
+        self._attempt_count = 0
+        self._cache_hits = 0
         self._total_cost_usd: float = 0.0
         self._lock = asyncio.Lock()
 
@@ -113,6 +117,7 @@ class Scheduler:
 
         while (
             self._run_count < self.config.max_runs
+            and self._attempt_count < self.config.max_runs
             and self._total_cost_usd < self.config.max_cost_usd
         ):
             prioritized = self.corpus.prioritize_entries(
@@ -189,6 +194,13 @@ class Scheduler:
             Executed case or None if cache hit.
         """
         async with semaphore:
+            async with self._lock:
+                if (
+                    self._attempt_count >= self.config.max_runs
+                    or self._total_cost_usd >= self.config.max_cost_usd
+                ):
+                    return None
+                self._attempt_count += 1
             if (
                 self.vram_monitor
                 and hasattr(self.vram_monitor, "should_throttle")
@@ -248,11 +260,14 @@ class Scheduler:
                 temperature=0.7,
                 max_tokens=None,
                 mutator_node_id=parent_node_id,
+                score_schema_version=SCORE_SCHEMA_VERSION,
             )
 
             if self.config.use_cache:
                 cached = self.cache.get(cache_key)
                 if cached:
+                    async with self._lock:
+                        self._cache_hits += 1
                     return None
 
             try:
@@ -306,6 +321,7 @@ class Scheduler:
                     inputs={"messages": [{"role": "user", "content": mutated_input}]},
                     target_response=target_response,
                     scores=scores,
+                    score_schema_version=SCORE_SCHEMA_VERSION,
                     trace_id=target_response.trace_id,
                     mutation_graph_node_id=parent_node_id,
                     mutation_path=mutation_path,
@@ -327,6 +343,7 @@ class Scheduler:
                     inputs={"messages": [{"role": "user", "content": mutated_input}]},
                     target_response=None,
                     scores=ScoreVector(tool_error_rate=1.0),
+                    score_schema_version=SCORE_SCHEMA_VERSION,
                     trace_id=None,
                     mutation_graph_node_id=parent_node_id,
                     mutation_path=mutation_path,
@@ -370,12 +387,7 @@ class Scheduler:
         conditioned risk vector so suite-specific failures (membership,
         claim-level faithfulness) are tracked too.
         """
-        if scores.leak_score > 0.5 or scores.policy_violation_score > 0.5:
-            return True
-        from ragfuzz.scoring.rag_metrics import rag_risk_vector
-
-        vector = rag_risk_vector(scores.model_dump())
-        return float(vector["rag_risk"]) > 0.5
+        return is_failure(scores.model_dump())
 
     def get_stats(self) -> dict[str, Any]:
         """Get scheduler statistics.
@@ -388,6 +400,8 @@ class Scheduler:
 
         return {
             "run_count": self._run_count,
+            "attempt_count": self._attempt_count,
+            "cache_hits": self._cache_hits,
             "total_cost_usd": self._total_cost_usd,
             "max_runs": self.config.max_runs,
             "concurrency": self.config.concurrency,

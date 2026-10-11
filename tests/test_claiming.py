@@ -163,7 +163,8 @@ class TestHeuristicRegistry:
         scorer = HeuristicScorer(config={"heuristics": ["refusal_classifier"]})
         scores = scorer.heuristic_fields(ScoreVector())
         assert "leak_score" not in scores
-        assert "policy_violation_score" in scores
+        assert "refusal_score" in scores
+        assert "policy_violation_score" not in scores
 
     @pytest.mark.asyncio
     async def test_membership_heuristic_scores_canary(self) -> None:

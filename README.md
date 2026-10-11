@@ -121,6 +121,16 @@ Run types are `retrieval`, `faithfulness`, `poisoning`, `prompt-injection`, `jai
 
 Only declared scoring heuristics run. Unknown names fail validation. Signals include canary leaks, policy violations, partial success, refusal latency, tool errors, poison influence, source trust, rank drift, conflict recovery, grounding, context degradation, and membership evidence. Declare only what the suite actually measures.
 
+`refusal_classifier` records an informational `refusal_score`; refusing a request alone is not a policy violation. A response can refuse and still leak a canary, so leak detection remains independent. `policy_violation_score` remains a risk signal for judge-confirmed violations. A non-refusal alone does not prove an attack succeeded.
+
+For `prompt-leak` runs, `canary.value` is the known target preamble used as the scoring reference. Set it to the target's actual protected text. It is not inserted into the target request. Detected prompt leakage contributes to failure counts, corpus feedback, reports, and baseline/run comparisons, using the existing threshold of strictly greater than 0.5. The CLI's zero exit status still means the run completed; inspect its summary and reports for findings.
+
+New runs and cases record `score_schema_version = 2` (under `extra` for run metadata). Older heuristic runs placed refusal observations in `policy_violation_score`; those saved scores keep their original interpretation when loaded. Baseline checks and run comparisons return `needs_rerun` for different, mixed, or unknown score schemas instead of claiming a regression or improvement. Rerun affected suites and replace their baselines before comparing across that scoring change. For compatible schemas, baseline comparisons recalculate summary counts from stored scores so prompt-leak and other RAG risk signals use the same threshold on both sides.
+
+Scheduler cache keys include the scoring schema, so old cache entries cannot suppress updated scoring runs. Cache hits consume the bounded attempt budget and are reported as skipped, not converted into scored cases. Use `--no-cache` when every requested attempt needs a fresh target response; text-only cached responses do not preserve the retrieval or tool evidence needed for full replay.
+
+An empty report now has `summary.evaluation_status = "not_evaluated"` and `summary.success_rate = null`; HTML, Markdown, and the demo show "Not evaluated". Consumers should handle the nullable rate instead of interpreting an empty run as 100% successful. Nonempty report rates and existing summary fields are retained.
+
 ## Target safety and handoff
 
 Record authorization before running a suite. Public and link-local targets are blocked by default; JR AutoRAG checks and poison runs default to loopback or private hosts.

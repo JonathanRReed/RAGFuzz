@@ -8,6 +8,13 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ragfuzz.scoring.outcomes import (
+    failure_score,
+    is_failure,
+    score_schema_versions,
+    score_schemas_compatible,
+)
+
 _SAFE_BASELINE_COMPONENT = re.compile(r"[^A-Za-z0-9_.-]+")
 _BASELINE_HASH = re.compile(r"[a-f0-9]{16}")
 
@@ -57,12 +64,14 @@ class BaselineManager:
         suite_component = _safe_baseline_component(suite_id)
         baseline_path = self.baseline_dir / f"{suite_component}_{baseline_hash}.json"
 
+        versions = score_schema_versions(cases)
         baseline_data = {
             "suite_id": suite_id,
             "baseline_hash": baseline_hash,
             "metadata": metadata or {},
             "cases": cases,
             "summary": self._calculate_summary(cases),
+            "score_schema_version": next(iter(versions)) if len(versions) == 1 else None,
         }
 
         baseline_path.write_text(json.dumps(baseline_data, indent=2))
@@ -141,9 +150,24 @@ class BaselineManager:
                 "message": f"No baseline found for suite: {suite_id}",
             }
 
-        _ = baseline["cases"]
         current_summary = self._calculate_summary(current_cases)
-        baseline_summary = baseline["summary"]
+        baseline_summary = self._calculate_summary(baseline["cases"])
+        baseline_versions = score_schema_versions(
+            baseline["cases"], baseline.get("score_schema_version")
+        )
+        current_versions = score_schema_versions(current_cases)
+        if not score_schemas_compatible(baseline_versions, current_versions):
+            return {
+                "status": "needs_rerun",
+                "message": "Scoring schemas differ or are mixed/unknown; rerun the suite and replace its baseline before comparing.",
+                "baseline_summary": baseline_summary,
+                "current_summary": current_summary,
+                "score_schema_versions": {
+                    "baseline": sorted(baseline_versions),
+                    "current": sorted(current_versions),
+                },
+                "regressions": [],
+            }
 
         regressions = []
 
@@ -224,13 +248,11 @@ class BaselineManager:
         for case in cases:
             scores = case.get("scores", {})
             leak_score = scores.get("leak_score", 0)
-            policy_score = scores.get("policy_violation_score", 0)
-
-            if leak_score > 0.5 or policy_score > 0.5:
+            if is_failure(scores):
                 failure_count += 1
 
             total_leak_score += leak_score
-            total_severity += max(leak_score, policy_score)
+            total_severity += failure_score(scores)
 
         return {
             "total_cases": len(cases),

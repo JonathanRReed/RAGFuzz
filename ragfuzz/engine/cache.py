@@ -81,6 +81,7 @@ class Cache:
         temperature: float,
         max_tokens: int | None,
         mutator_node_id: str | None = None,
+        score_schema_version: int | None = None,
     ) -> str:
         """Generate a cache key for a request.
 
@@ -91,6 +92,7 @@ class Cache:
             temperature: The sampling temperature.
             max_tokens: Maximum tokens.
             mutator_node_id: Optional mutator node ID.
+            score_schema_version: Optional evaluation namespace for cached requests.
 
         Returns:
             A cache key hash.
@@ -103,6 +105,8 @@ class Cache:
             "max_tokens": max_tokens,
             "mutator_node_id": mutator_node_id,
         }
+        if score_schema_version is not None:
+            data["score_schema_version"] = score_schema_version
 
         data_str = json.dumps(data, sort_keys=True)
         return hashlib.sha256(data_str.encode()).hexdigest()

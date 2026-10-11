@@ -12,7 +12,9 @@ from uuid import uuid4
 
 import httpx
 
+from ragfuzz.constants import SCORE_SCHEMA_VERSION
 from ragfuzz.reports import build_report_data, redact_value
+from ragfuzz.scoring.outcomes import score_schema_versions
 from ragfuzz.utils import should_trust_env
 
 
@@ -387,6 +389,7 @@ class DemoState:
                 },
             },
             "extra": {
+                "score_schema_version": SCORE_SCHEMA_VERSION,
                 "mode": "demo",
                 "status": status,
                 "demo_provider_status": provider_config["status"],
@@ -423,6 +426,7 @@ class DemoState:
 
         return {
             "case_id": f"{run_id}-case-{index + 1:02d}",
+            "score_schema_version": SCORE_SCHEMA_VERSION,
             "run_id": run_id,
             "suite_id": f"suite-{run_id}",
             "inputs": {
@@ -517,6 +521,7 @@ class DemoState:
                     continue
 
                 provider_config = self._active_provider_config()
+                versions = score_schema_versions(cases) or {SCORE_SCHEMA_VERSION}
                 run_data = {
                     "run_id": run_id,
                     "timestamp": run["started_at"],
@@ -534,6 +539,9 @@ class DemoState:
                         },
                     },
                     "extra": {
+                        "score_schema_version": next(iter(versions))
+                        if len(versions) == 1
+                        else None,
                         "mode": "demo",
                         "status": "completed",
                         "demo_provider_status": provider_config["status"],

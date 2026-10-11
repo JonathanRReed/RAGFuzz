@@ -38,6 +38,8 @@ class ScoreVector(BaseModel):
 
     leak_score: float = 0.0
     policy_violation_score: float = 0.0
+    # Protective response observation, not evidence of a policy violation.
+    refusal_score: float = 0.0
     partial_success_score: float = 0.0
     refusal_latency_delta: float = 0.0
     tool_error_rate: float = 0.0
@@ -76,6 +78,8 @@ class Case(BaseModel):
     mutation_trace: list[str] = Field(default_factory=list)
     target_response: Response | None = None
     scores: ScoreVector = Field(default_factory=ScoreVector)
+    # Unmarked historical cases must retain their original score interpretation.
+    score_schema_version: int | None = None
     trace_id: str | None = None
     rag_lens_url: str | None = None
     retrieval_snapshot: dict[str, Any] = Field(default_factory=dict)

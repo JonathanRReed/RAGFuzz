@@ -240,7 +240,7 @@
             td(statusBadge),
             td(`${Number(run.progress || 0)}%`),
             td(String(Number(summary.failure_count || 0))),
-            td(`${String(summary.success_rate ?? 0)}%`),
+            td(summary.success_rate == null ? "Not evaluated" : `${String(summary.success_rate)}%`),
             td(actions),
         );
         return row;
